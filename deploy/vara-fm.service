@@ -1,0 +1,38 @@
+# /etc/systemd/system/vara-fm.service - VARA FM (Windows x86) under box64 + Wine, headless.
+# Started/stopped ONLY by RigBroker (profile vara_fm). Never enable at boot.
+# Runs as "rigbroker", which is NOT in the dialout group: it cannot open the Digirig
+# serial port (PTT), whatever COM ports Wine maps. PTT is keyed by Pat via rigctld.
+[Unit]
+Description=VARA FM modem (Wine/box64) - managed by RigBroker
+# PTT: VARA's CAT on Wine COM10 -> vara-cat (TS-2000 emulator) -> rigctld
+Wants=vara-cat.service
+After=sound.target rigctld-vu.service vara-cat.service
+
+[Service]
+Type=exec
+User=rigbroker
+Group=rigbroker
+SupplementaryGroups=audio
+Environment=HOME=/var/lib/rigbroker
+Environment=WINEPREFIX=/var/lib/rigbroker/vara/prefix
+Environment=WINEDEBUG=-all BOX64_LOG=0 BOX64_NOBANNER=1
+Environment="WINEDLLOVERRIDES=mscoree=;mshtml="
+ExecStart=/usr/bin/xvfb-run -a -s "-screen 0 1280x900x24 -nolisten tcp" /usr/bin/box64 /opt/vara/wine/bin/wine "C:\\VARA FM\\VARAFM.exe"
+# VARA ignores SIGTERM; ask Wine itself to end every process in the prefix first (fast),
+# then systemd cleans up whatever is left (Xvfb).
+ExecStop=-/usr/bin/box64 /opt/vara/wine/bin/wineserver -k
+KillMode=control-group
+TimeoutStopSec=15
+SuccessExitStatus=1 SIGTERM SIGKILL
+Restart=no
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/rigbroker/vara
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+CapabilityBoundingSet=

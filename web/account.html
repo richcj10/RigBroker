@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Account · RigBroker</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M8 1v14M3 5l5-4 5 4' stroke='%23e8a33d' stroke-width='2' fill='none'/%3E%3C/svg%3E">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18M6 8l6-5 6 5M4 21h16"/></svg>
+      <h1>RigBroker</h1>
+    </div>
+    <nav class="views" aria-label="Views">
+      <a href="/#station">Station</a>
+      <a href="/#aprs">APRS</a>
+      <a href="/account" class="on">Account</a>
+    </nav>
+    <div class="top-right">
+      <span class="pill ok" id="who"></span>
+      <button type="button" class="small" id="logout">Log out</button>
+    </div>
+  </header>
+
+  <main class="narrow">
+    <section class="panel">
+      <h2>Change your password</h2>
+      <form id="pw-form" class="stack">
+        <input type="text" name="username" autocomplete="username" hidden>
+        <label>Current password <input name="current" type="password" required maxlength="256" autocomplete="current-password"></label>
+        <label>New password <input name="new" type="password" required minlength="10" maxlength="256" autocomplete="new-password"></label>
+        <label>Repeat new password <input name="repeat" type="password" required minlength="10" maxlength="256" autocomplete="new-password"></label>
+        <p class="sub">At least 10 characters. Changing it logs you out on your other devices.</p>
+        <div class="err" role="alert" id="pw-err"></div>
+        <div><button type="submit">Change password</button></div>
+      </form>
+    </section>
+
+    <section class="panel" id="admin" hidden>
+      <div class="log-head">
+        <h2>Users</h2>
+      </div>
+      <p class="sub">Operators run the radio (leases, Winlink, APRS messages, clearing faults). Admins can also manage users and Direwolf.</p>
+      <div class="gw-wrap">
+        <table class="gw">
+          <thead><tr><th>User</th><th>Role</th><th>Status</th><th>Last login</th><th></th></tr></thead>
+          <tbody id="users"></tbody>
+        </table>
+      </div>
+      <form id="add-form" class="gw-form">
+        <label>New username <input name="name" required maxlength="32" autocapitalize="none" spellcheck="false" placeholder="ky4wl"></label>
+        <label>Role <select name="role"><option value="operator">operator</option><option value="admin">admin</option></select></label>
+        <button type="submit">Add user</button>
+      </form>
+      <div class="note" id="temp" hidden>
+        One-time password for <b id="temp-user"></b> (shown only now; they must change it at first login):
+        <pre id="temp-pw"></pre>
+        <button type="button" class="small" id="temp-copy">Copy</button>
+        <button type="button" class="small ghost" id="temp-hide">Done</button>
+      </div>
+
+      <h3 class="mini">API tokens (Home Assistant, CLI)</h3>
+      <ul class="bulletins" id="tokens"></ul>
+      <p class="sub">Create or revoke on the Pi: <code>.venv/bin/rigbroker-admin token create home-assistant</code></p>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" role="status" hidden></div>
+  <script src="/static/account.js"></script>
+</body>
+</html>

@@ -1,0 +1,296 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RigBroker</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M8 1v14M3 5l5-4 5 4' stroke='%23e8a33d' stroke-width='2' fill='none'/%3E%3C/svg%3E">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18M6 8l6-5 6 5M4 21h16"/></svg>
+      <h1>RigBroker</h1>
+      <span id="mode" class="pill"></span>
+      <span id="txmode" class="pill"></span>
+    </div>
+    <nav class="views" aria-label="Views">
+      <a href="#station" data-view="station">Station</a>
+      <a href="#aprs" data-view="aprs" id="nav-aprs" hidden>APRS <span class="badge" id="nav-badge" hidden></span></a>
+    </nav>
+    <div class="top-right">
+      <div class="conn"><span id="conn-dot" class="dot"></span><span id="conn-text">connecting…</span></div>
+      <a id="auth-state" class="pill" href="/account"></a>
+      <button id="auth-btn" class="small" type="button" hidden>Log in</button>
+    </div>
+  </header>
+
+  <main>
+    <section id="radios" class="radios view-station" aria-live="polite"></section>
+
+    <section class="panel view-aprs" id="aprs-panel" hidden>
+      <div class="log-head">
+        <div>
+          <h2>APRS <span class="sub" id="aprs-call"></span></h2>
+          <div class="health" id="aprs-health"></div>
+        </div>
+        <div class="aprs-links">
+          <a id="aprs-fi-me" target="_blank" rel="noopener noreferrer">My station on aprs.fi ↗</a>
+          <a id="aprs-fi-area" target="_blank" rel="noopener noreferrer" hidden>Area on aprs.fi ↗</a>
+        </div>
+      </div>
+      <div class="tabs" role="tablist">
+        <button type="button" role="tab" class="tab on" data-tab="map">Map</button>
+        <button type="button" role="tab" class="tab" data-tab="msgs">Messages <span class="badge" id="msg-badge" hidden></span></button>
+        <button type="button" role="tab" class="tab" data-tab="heard">Heard <span class="sub" id="heard-count"></span></button>
+        <button type="button" role="tab" class="tab" data-tab="pkts">Packets</button>
+      </div>
+      <div class="tabpane" data-pane="map">
+        <div id="map" class="map" aria-label="Map of stations heard on RF"></div>
+        <div class="sub map-note" id="map-note"></div>
+      </div>
+      <div class="tabpane" data-pane="msgs" hidden>
+        <form id="msg-form" class="msg-form">
+          <label>To <input name="to" required maxlength="9" placeholder="KY4WL-7" autocomplete="off"></label>
+          <label class="grow">Message <input name="text" required maxlength="67" autocomplete="off" placeholder="Up to 67 characters"></label>
+          <span class="sub" id="msg-count">0/67</span>
+          <button type="submit">Send</button>
+        </form>
+        <div class="sub" id="msg-hint"></div>
+        <ul class="msgs" id="msgs"></ul>
+        <h3 class="mini">Bulletins</h3>
+        <ul class="bulletins" id="bulletins"></ul>
+      </div>
+      <div class="tabpane" data-pane="heard" hidden>
+        <div class="gw-wrap">
+          <table class="gw">
+            <thead><tr><th>Station</th><th>Dist</th><th>Brg</th><th>Last heard</th><th>Via</th><th>Pkts</th><th>Info</th></tr></thead>
+            <tbody id="heard"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="tabpane" data-pane="pkts" hidden>
+        <div class="log-wrap"><table class="log"><tbody id="pkts"></tbody></table></div>
+      </div>
+    </section>
+
+    <section class="panel view-aprs" id="dw-panel" hidden>
+      <details id="dw-details">
+        <summary><h2 class="inline-h">Direwolf</h2> <span class="sub" id="dw-summary"></span></summary>
+        <form id="dw-form" class="dw-form">
+          <fieldset>
+            <legend>Station</legend>
+            <label>Callsign <input name="callsign" disabled></label>
+            <label>Audio device <input name="adevice" required maxlength="64"></label>
+            <label>Sample rate <select name="arate"><option>48000</option><option>44100</option></select></label>
+            <label>PTT via rigctld port <input name="rigctld_port" type="number" min="1024" max="65535"></label>
+            <label>TXDELAY (×10 ms) <input name="txdelay" type="number" min="5" max="100"></label>
+            <label>TXTAIL (×10 ms) <input name="txtail" type="number" min="1" max="50"></label>
+          </fieldset>
+          <fieldset>
+            <legend>Beacon</legend>
+            <label class="inline"><input type="checkbox" name="beacon"> Send position beacon</label>
+            <label>Every (min, ≥10) <input name="beacon_every_min" type="number" min="10" max="1440"></label>
+            <label>Latitude <input name="lat" type="number" step="0.00001" min="-90" max="90" placeholder="37.12345"></label>
+            <label>Longitude <input name="lon" type="number" step="0.00001" min="-180" max="180" placeholder="-85.12345"></label>
+            <label>Symbol <input name="symbol" maxlength="2" placeholder="/-"></label>
+            <label class="grow">Comment <input name="comment" maxlength="43"></label>
+            <label>Path <select name="beacon_path"><option value="WIDE1-1,WIDE2-1">WIDE1-1,WIDE2-1</option><option value="WIDE2-1">WIDE2-1</option><option value="WIDE1-1">WIDE1-1</option><option value="">none (direct only)</option></select></label>
+          </fieldset>
+          <fieldset>
+            <legend>Digipeater &amp; iGate</legend>
+            <label>Digipeater <select name="digipeater"><option value="off">off</option><option value="fill-in">fill-in (WIDE1-1)</option><option value="wide">wide (WIDEn-N)</option></select></label>
+            <label class="inline"><input type="checkbox" name="igate"> iGate (RF → APRS-IS)</label>
+            <label class="inline"><input type="checkbox" name="igate_tx"> also gate messages APRS-IS → RF</label>
+            <label>Server <input name="igate_server" maxlength="80"></label>
+            <label>Passcode <input name="passcode" type="password" inputmode="numeric" placeholder="auto from callsign" autocomplete="off"></label>
+          </fieldset>
+          <div class="dw-actions">
+            <button type="submit">Save</button>
+            <button type="button" id="dw-apply">Save &amp; apply (restart Direwolf)</button>
+            <select id="dw-prev-inst"><option>aprs</option><option>aprs-rx</option><option>pkt</option></select>
+            <button type="button" class="ghost" id="dw-preview">Preview config</button>
+          </div>
+          <pre class="dw-preview" id="dw-preview-text" hidden></pre>
+        </form>
+      </details>
+    </section>
+
+    <section class="panel view-station" id="wx-help">
+      <details>
+        <summary><h2 class="inline-h">Connect Winlink Express</h2> <span class="sub">remote setup: Winlink runs on your PC, the radio stays on the Pi</span></summary>
+        <div class="help">
+          <p class="sub">The Pi tunes the radio and runs the modem; Winlink Express on your PC talks to it over the network.
+            Only your PC can reach these ports (firewall). Nothing can transmit unless RigBroker has started a Winlink session.</p>
+
+          <h3 class="mini">1. Start a session here first</h3>
+          <ol>
+            <li><b>Packet:</b> pick a gateway in <em>Winlink gateways</em> below (★ / Try) or press <em>Start Winlink session</em>: the radio tunes to that gateway and the packet modem starts.</li>
+            <li><b>VARA FM:</b> press the <em>vara_fm</em> profile: the radio tunes and VARA FM starts on the Pi (about 10 s).</li>
+            <li>The radio is held for the session (lease timer on the radio card). Press <em>Release</em> when done; it returns to APRS.</li>
+          </ol>
+
+          <h3 class="mini">2a. Winlink Express - Packet Winlink session</h3>
+          <dl class="kv">
+            <dt>Session type</dt><dd>Packet Winlink</dd>
+            <dt>TNC type</dt><dd>KISS (Direwolf), connected over TCP/IP - not a serial port</dd>
+            <dt>TCP host / address</dt><dd><code data-wx="host">192.168.5.157</code></dd>
+            <dt>TCP port</dt><dd><code data-wx="pkt">8010</code></dd>
+            <dt>Radio control in Winlink Express</dt><dd>none / manual - RigBroker tunes the radio</dd>
+          </dl>
+
+          <h3 class="mini">2b. Winlink Express - VARA FM Winlink session</h3>
+          <dl class="kv">
+            <dt>Session type</dt><dd>VARA FM Winlink</dd>
+            <dt>VARA TCP host / address</dt><dd><code data-wx="host">192.168.5.157</code> (VARA runs on the Pi, not on the PC)</dd>
+            <dt>VARA command port</dt><dd><code>8300</code> (data port 8301)</dd>
+            <dt>"Run VARA automatically"</dt><dd>off - RigBroker starts VARA on the Pi</dd>
+            <dt>Radio control / PTT in Winlink Express</dt><dd>none - VARA on the Pi keys the radio through RigBroker's rig control</dd>
+          </dl>
+
+          <h3 class="mini">3. Connect</h3>
+          <ol>
+            <li>In the Winlink Express session window, choose the same gateway (callsign) you picked here, then <em>Start</em>.</li>
+            <li>Watch the radio card: <span class="ind tx on">TX</span> lights while the Pi transmits; the S-meter shows the gateway.</li>
+          </ol>
+          <p class="sub" data-wx="state"></p>
+        </div>
+      </details>
+    </section>
+
+    <section class="panel view-station" id="gw-panel">
+      <div class="log-head">
+        <div>
+          <h2>Winlink gateways</h2>
+          <div class="sub" id="gw-info"></div>
+        </div>
+        <button class="ghost small" id="gw-add-toggle" type="button">+ Add gateway</button>
+      </div>
+      <form id="gw-form" class="gw-form" hidden>
+        <label>Callsign <input name="call" required placeholder="W4ABC-10" maxlength="11" autocomplete="off"></label>
+        <label>Freq (MHz) <input name="mhz" required type="number" step="0.0001" min="0.1" placeholder="145.050"></label>
+        <label>Mode
+          <select name="mode"><option value="packet">packet</option><option value="vara_fm">vara_fm</option><option value="vara_hf">vara_hf</option><option value="ardop">ardop</option></select>
+        </label>
+        <label>Grid <input name="grid" placeholder="EM85ab" maxlength="6" autocomplete="off"></label>
+        <label class="grow">Note <input name="note" maxlength="200" placeholder="works well mornings"></label>
+        <label class="inline"><input type="checkbox" name="favorite" checked> favorite</label>
+        <button type="submit">Save</button>
+      </form>
+      <div class="gw-wrap">
+        <table class="gw">
+          <thead><tr><th title="Favorite">★</th><th>Gateway</th><th>Freq</th><th>Mode</th><th>Dist</th><th>Success</th><th>Last OK</th><th>Score</th><th></th></tr></thead>
+          <tbody id="gw-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel view-station" id="schedule-panel">
+      <h2>Schedule</h2>
+      <ul id="schedule" class="schedule"></ul>
+    </section>
+
+    <section class="panel view-station" id="log-panel">
+      <div class="log-head">
+        <h2>Event log</h2>
+        <div class="log-filters">
+          <label><input type="checkbox" id="f-steps" checked> steps</label>
+          <label><input type="checkbox" id="f-warn"> warnings+ only</label>
+          <button id="log-clear" class="ghost small" type="button">Clear view</button>
+        </div>
+      </div>
+      <div class="log-wrap"><table class="log"><tbody id="log"></tbody></table></div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" role="status" hidden></div>
+
+  <template id="radio-tpl">
+    <article class="radio">
+      <header class="radio-head">
+        <div>
+          <h2 data-f="title"></h2>
+          <div class="sub" data-f="sub"></div>
+        </div>
+        <span class="state" data-f="state"></span>
+      </header>
+
+      <div class="fault" data-f="fault" hidden>
+        <div>
+          <strong data-f="fault-title">FAULT — TX inhibited</strong>
+          <div data-f="fault-reason"></div>
+          <div class="sub" data-f="fault-meta"></div>
+        </div>
+        <button class="danger" data-a="clear-fault" type="button">Clear fault</button>
+      </div>
+
+      <div class="readout">
+        <div class="freq"><span data-f="freq">—</span><small data-f="mode"></small></div>
+        <div class="indicators">
+          <span class="ind tx" data-f="tx">TX</span>
+          <span class="ind busy" data-f="busy">BUSY</span>
+        </div>
+      </div>
+
+      <div class="meter" title="S-meter">
+        <div class="meter-bar"><div class="meter-fill" data-f="smeter"></div></div>
+        <div class="meter-scale"><span>S1</span><span>S3</span><span>S5</span><span>S7</span><span>S9</span><span>+20</span><span>+40</span><span>+60</span></div>
+        <div class="meter-val" data-f="sval">—</div>
+      </div>
+
+      <dl class="facts">
+        <div><dt>Profile</dt><dd data-f="profile">—</dd></div>
+        <div><dt>Power</dt><dd data-f="power">—</dd></div>
+        <div><dt>Squelch</dt><dd data-f="sql">—</dd></div>
+        <div><dt>Lease</dt><dd data-f="lease">—</dd></div>
+      </dl>
+
+      <div class="health">
+        <span class="chip" data-f="h-civ">CI-V</span>
+        <span class="chip" data-f="h-svc">service</span>
+        <span class="chip" data-f="h-tx">TX</span>
+      </div>
+
+      <div class="controls">
+        <div class="lease-opts">
+          <label>Minutes <input type="number" min="0.5" step="0.5" data-f="minutes" placeholder="max"></label>
+          <label>Priority
+            <select data-f="priority"><option value="manual">manual</option><option value="scheduled">scheduled</option></select>
+          </label>
+          <label class="inline"><input type="checkbox" data-f="queue"> queue if busy</label>
+        </div>
+        <div class="profiles" data-f="profiles"></div>
+        <div class="actions">
+          <button data-a="release" type="button">Release → default</button>
+          <button data-a="winlink" type="button">Winlink check</button>
+        </div>
+      </div>
+
+      <div class="queue" data-f="queue" hidden></div>
+
+      <details class="mock" data-f="mock" hidden>
+        <summary>Mock fault injection</summary>
+        <div class="mock-btns">
+          <button class="ghost small" data-inject="stuck_tx" type="button">Stuck TX</button>
+          <button class="ghost small" data-inject="release_tx" type="button">Release TX</button>
+          <button class="ghost small" data-inject="offline" type="button">Rig offline</button>
+          <button class="ghost small" data-inject="online" type="button">Rig online</button>
+          <button class="ghost small" data-inject="readback_bad" type="button">Bad read-back</button>
+          <button class="ghost small" data-inject="readback_ok" type="button">Read-back OK</button>
+          <button class="ghost small" data-inject="busy" type="button">Hold channel busy</button>
+          <button class="ghost small" data-inject="clear" type="button">Channel normal</button>
+          <button class="ghost small" data-inject="knob" type="button">Turn VFO knob</button>
+        </div>
+      </details>
+    </article>
+  </template>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+          integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script src="/static/app.js"></script>
+  <script src="/static/aprs.js"></script>
+</body>
+</html>

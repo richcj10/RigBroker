@@ -1,0 +1,25 @@
+# /etc/systemd/system/vara-cat.service - virtual COM (TS-2000 CAT) for VARA FM's PTT,
+# bridged to rigctld. Started/stopped together with vara-fm.service (never on its own).
+[Unit]
+Description=VARA FM CAT PTT bridge (virtual COM -> rigctld) - managed by RigBroker
+After=rigctld-vu.service
+PartOf=vara-fm.service
+
+[Service]
+Type=exec
+User=rigbroker
+Group=rigbroker
+RuntimeDirectory=rigbroker-cat
+RuntimeDirectoryMode=0700
+ExecStart=/bin/bash /usr/local/lib/rigbroker/vara-cat.sh
+Restart=no
+SuccessExitStatus=143 SIGTERM
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=

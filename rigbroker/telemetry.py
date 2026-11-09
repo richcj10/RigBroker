@@ -1,0 +1,142 @@
+"""Telemetry poller: reads each rig periodically, detects offline/online and stuck TX."""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import time
+from dataclasses import asdict, dataclass
+from typing import Any, Protocol
+
+from .config import SafetyConfig
+from .rig_client import RigClient, RigConnectionError, RigError, RigTimeout
+
+log = logging.getLogger("rigbroker.telemetry")
+
+
+@dataclass
+class Telemetry:
+    """Latest known rig readings."""
+
+    online: bool = False
+    polling: bool = True  # False while the active profile has the rig powered off
+    freq: int | None = None
+    mode: str | None = None
+    ptt: bool | None = None
+    dcd: bool | None = None
+    strength: float | None = None
+    failures: int = 0
+    last_ok: float | None = None  # wall clock
+    last_error: str | None = None
+    tx_since: float | None = None  # monotonic
+
+    def to_dict(self) -> dict[str, Any]:
+        d = asdict(self)
+        d["tx_for_s"] = round(time.monotonic() - self.tx_since, 1) if self.tx_since else 0.0
+        del d["tx_since"]
+        return d
+
+
+@dataclass(frozen=True)
+class Sample:
+    """One successful poll."""
+
+    started_mono: float
+    freq: int
+    mode: str
+    ptt: bool
+    dcd: bool
+    strength: float | None
+
+
+class PollerCallbacks(Protocol):
+    """Implemented by the RadioController."""
+
+    def should_poll(self) -> bool: ...
+    async def on_sample(self, sample: Sample) -> None: ...
+    async def on_offline(self, reason: str) -> None: ...
+    async def on_online(self) -> None: ...
+    async def on_stuck_tx(self, seconds: float) -> None: ...
+
+
+class TelemetryPoller:
+    """Polls freq, mode, PTT, DCD and STRENGTH every ``poll_interval_s``.
+
+    After ``offline_after_failures`` consecutive failures the rig is marked offline and the
+    poll interval backs off exponentially up to ``poll_backoff_max_s``.
+    """
+
+    def __init__(self, rig: RigClient, safety: SafetyConfig, tel: Telemetry,
+                 cb: PollerCallbacks) -> None:
+        self.rig = rig
+        self.safety = safety
+        self.tel = tel
+        self.cb = cb
+        self._offline_announced = False
+        self._stuck_reported = False
+
+    async def run(self) -> None:
+        """Poll forever (cancel to stop). A bug in one poll never kills the poller."""
+        while True:
+            try:
+                delay = await self.poll_once()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                log.exception("telemetry poll crashed; continuing")
+                delay = self.safety.poll_interval_s
+            await asyncio.sleep(delay)
+
+    async def poll_once(self) -> float:
+        """Do one poll; return the delay before the next one."""
+        s, t = self.safety, self.tel
+        if not self.cb.should_poll():
+            t.polling, t.online, t.ptt, t.tx_since = False, False, False, None
+            self._stuck_reported = False
+            return s.poll_interval_s
+        t.polling = True
+        started = time.monotonic()
+        try:
+            freq = await self.rig.get_freq()
+            mode, _ = await self.rig.get_mode()
+            ptt = await self.rig.get_ptt()
+            dcd = await self.rig.get_dcd()
+            strength: float | None
+            try:
+                strength = await self.rig.get_level("STRENGTH")
+            except (RigTimeout, RigConnectionError):
+                raise
+            except RigError:
+                strength = None  # level not supported by this rig
+        except RigError as exc:
+            t.failures += 1
+            t.last_error = str(exc)
+            th = s.offline_after_failures
+            if t.failures >= th:
+                if not self._offline_announced:
+                    self._offline_announced = True
+                    t.online = False
+                    await self.cb.on_offline(str(exc))
+                return float(min(s.poll_interval_s * 2 ** (t.failures - th + 1),
+                                 s.poll_backoff_max_s))
+            return s.poll_interval_s
+
+        now = time.monotonic()
+        was_online = t.online
+        t.freq, t.mode, t.ptt, t.dcd, t.strength = freq, mode, ptt, dcd, strength
+        t.failures, t.online, t.last_ok, t.last_error = 0, True, time.time(), None
+        self._offline_announced = False
+        if ptt:
+            if t.tx_since is None:
+                t.tx_since = now
+            dur = now - t.tx_since
+            if dur > s.stuck_tx_s and not self._stuck_reported:
+                self._stuck_reported = True
+                await self.cb.on_stuck_tx(dur)
+        else:
+            t.tx_since = None
+            self._stuck_reported = False
+        if not was_online:
+            await self.cb.on_online()
+        await self.cb.on_sample(Sample(started, freq, mode, ptt, dcd, strength))
+        return s.poll_interval_s

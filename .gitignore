@@ -1,0 +1,25 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# local/secret state - never commit
+*.local.yaml
+auth.json
+*.pid
+*.log
+.env
+
+# editors / OS
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store

@@ -1,0 +1,72 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rigbroker"
+version = "0.1.0"
+description = "Radio resource broker for a Pi-based ham station"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.7,<3",
+    "pyyaml>=6,<7",
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+    "websockets>=12",
+    "aprslib>=0.7,<0.8",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.6",
+    "mypy>=1.11",
+    "types-PyYAML",
+    "httpx>=0.27",
+]
+
+[project.scripts]
+rigbroker = "rigbroker.__main__:main"
+rigbrokerctl = "rigbroker.cli:main"
+rigbroker-admin = "rigbroker.admin:main"
+
+[tool.setuptools.packages.find]
+include = ["rigbroker*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = [
+    # starlette's TestClient prefers httpx2; httpx still works (test-only dependency)
+    "ignore:Using `httpx` with `starlette.testclient` is deprecated",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "ASYNC", "RUF", "SIM"]
+ignore = ["RUF012"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["ASYNC109"]  # test helpers poll with an explicit timeout argument
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+plugins = ["pydantic.mypy"]
+files = ["rigbroker", "tests"]
+
+[[tool.mypy.overrides]]
+module = "aprslib"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+disallow_incomplete_defs = false

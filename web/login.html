@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Log in · RigBroker</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M8 1v14M3 5l5-4 5 4' stroke='%23e8a33d' stroke-width='2' fill='none'/%3E%3C/svg%3E">
+</head>
+<body class="auth-page">
+  <main class="auth-card">
+    <div class="brand">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18M6 8l6-5 6 5M4 21h16"/></svg>
+      <h1>RigBroker</h1>
+    </div>
+
+    <section id="first-run" class="note" hidden>
+      <strong>First start.</strong> Log in as <code>admin</code> with the one-time password
+      the broker created on the Pi:
+      <pre id="first-run-cmd">cat ~/.config/rigbroker/initial-admin-password</pre>
+      You'll choose your own password right after.
+    </section>
+
+    <form id="login-form" autocomplete="on">
+      <h2>Log in</h2>
+      <label>Username <input name="username" required maxlength="64" autocomplete="username" autocapitalize="none" spellcheck="false"></label>
+      <label>Password <input name="password" type="password" required maxlength="256" autocomplete="current-password"></label>
+      <div class="err" role="alert" id="login-err"></div>
+      <button type="submit">Log in</button>
+    </form>
+
+    <form id="change-form" hidden>
+      <h2>Choose a new password</h2>
+      <p class="sub" id="change-why">This is a one-time password. Pick your own to continue.</p>
+      <input type="text" name="username" autocomplete="username" hidden>
+      <label>New password <input name="new" type="password" required minlength="10" maxlength="256" autocomplete="new-password"></label>
+      <label>Repeat <input name="repeat" type="password" required minlength="10" maxlength="256" autocomplete="new-password"></label>
+      <p class="sub">At least 10 characters. A few random words work well.</p>
+      <div class="err" role="alert" id="change-err"></div>
+      <button type="submit">Set password &amp; continue</button>
+    </form>
+
+    <section id="signed-in" hidden>
+      <h2>Signed in</h2>
+      <p>You're logged in as <b id="me-name"></b> (<span id="me-role"></span>).</p>
+      <div class="row">
+        <a class="btn" href="/">Open the station</a>
+        <a class="btn ghost" href="/account">Account</a>
+        <button type="button" class="ghost" id="logout">Log out</button>
+      </div>
+    </section>
+
+    <p class="sub foot"><a href="/">← Back to the station (view only)</a></p>
+  </main>
+  <script src="/static/login.js"></script>
+</body>
+</html>

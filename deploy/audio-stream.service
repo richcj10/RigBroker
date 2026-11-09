@@ -1,0 +1,14 @@
+# /etc/systemd/system/audio-stream.service - PLACEHOLDER consumer for the "monitor"
+# profile (RX audio to the browser comes in a later milestone). Receive-only by design.
+[Unit]
+Description=RX audio stream (placeholder) - managed by RigBroker
+
+[Service]
+Type=exec
+User=rigbroker
+ExecStart=/bin/sleep infinity
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateNetwork=yes

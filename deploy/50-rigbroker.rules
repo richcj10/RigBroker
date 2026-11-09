@@ -1,0 +1,22 @@
+// /etc/polkit-1/rules.d/50-rigbroker.rules
+// Least privilege: the "rigbroker" service user may start/stop/restart ONLY the units it
+// owns - no sudo, nothing else. Keep this list in sync with config/profiles.yaml.
+polkit.addRule(function (action, subject) {
+    if (action.id !== "org.freedesktop.systemd1.manage-units" || subject.user !== "rigbroker") {
+        return polkit.Result.NOT_HANDLED;
+    }
+    var units = [
+        "direwolf@aprs.service",
+        "direwolf@aprs-rx.service",
+        "direwolf@pkt.service",
+        "vara-fm.service",
+        "audio-stream.service",
+        "rigctld-vu.service",
+        "rigctld-hf.service"
+    ];
+    var verbs = ["start", "stop", "restart"];
+    if (units.indexOf(action.lookup("unit")) >= 0 && verbs.indexOf(action.lookup("verb")) >= 0) {
+        return polkit.Result.YES;
+    }
+    return polkit.Result.NO;
+});

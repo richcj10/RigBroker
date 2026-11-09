@@ -1,0 +1,27 @@
+# /etc/systemd/system/rigctld-vu.service - Hamlib rigctld for the ID-4100A (radio "vu")
+# Digirig: CP2102N serial (CI-V + PTT on RTS) + C-Media audio. Bench-tested 2026-11-08.
+# CI-V address 0x9A, 9600 baud (as set in the radio: SET > Function > CI-V).
+#
+# NOTE: each rigctld START briefly asserts RTS (= Digirig PTT) for ~55 ms before Hamlib
+# drops it (measured). Keep rigctld long-running; restart it as rarely as possible.
+[Unit]
+Description=rigctld for ID-4100A (RigBroker radio "vu")
+After=dev-ttyUSB0.device
+
+[Service]
+Type=exec
+User=ham
+Group=dialout
+ExecStart=/usr/bin/rigctld -m 3082 \
+  -r /dev/serial/by-id/usb-Silicon_Labs_CP2102N_USB_to_UART_Bridge_Controller_9846aeb62cc6ef1188be69527a5e3baa-if00-port0 \
+  -s 9600 -T 127.0.0.1 -t 4542 \
+  --set-conf=civaddr=0x9A,ptt_type=RTS
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target
