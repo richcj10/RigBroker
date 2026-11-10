@@ -835,7 +835,8 @@ class RadioController:
         if prof.power is not None:
             p = await self.rig.get_level("RFPOWER")
             if abs(p - prof.power) > s.level_tolerance:
-                bad.append(f"RFPOWER {p:g} != {prof.power:g}")
+                bad.append(f"RFPOWER {p:g} != {prof.power:g} (the radio doesn't support that "
+                           f"level and set {p:.3f} instead: use power: {p:.3f} in the profile)")
         if bad:
             raise ReadbackMismatch("read-back mismatch: " + "; ".join(bad))
 
