@@ -135,11 +135,26 @@ class Hooks(_Strict):
     rig_power_cut: str | None = None
 
 
+class InterfaceConfig(_Strict):
+    """The USB radio interface (e.g. a Digi-Rig), so a failure can be pinned on it.
+
+    Find the values on the Pi:  cat /sys/bus/usb/devices/*/serial   and   cat /proc/asound/cards
+    """
+
+    name: str = "Digi-Rig"
+    usb_serial: str | None = Field(
+        default=None, description="USB serial number of its serial chip (CP2102N etc.)")
+    audio_card: str | None = Field(
+        default=None, description="ALSA card id of its sound card, e.g. 'Device'")
+
+
 class RadioConfig(_Strict):
     """One radio: its rigctld endpoint, profiles and default profile."""
 
     name: str
     rigctld: str = Field(description="host:port of this radio's rigctld")
+    interface: InterfaceConfig | None = Field(
+        default=None, description="USB interface checks for clearer failure messages")
     rigctld_service: str | None = Field(
         default=None, description="systemd unit restarted during fault recovery"
     )

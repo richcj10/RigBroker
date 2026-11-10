@@ -28,6 +28,11 @@ class Telemetry:
     failures: int = 0
     last_ok: float | None = None  # wall clock
     last_error: str | None = None
+    # which link failed while offline: digirig_missing | rigctld_down | radio_not_answering
+    # | rig_error (see hwcheck.py); None while online
+    failure: str | None = None
+    # interface presence from the last check: {"serial": bool|None, "audio": bool|None}
+    interface: dict[str, bool | None] | None = None
     tx_since: float | None = None  # monotonic
 
     def to_dict(self) -> dict[str, Any]:
@@ -55,6 +60,8 @@ class PollerCallbacks(Protocol):
     def should_poll(self) -> bool: ...
     async def on_sample(self, sample: Sample) -> None: ...
     async def on_offline(self, reason: str) -> None: ...
+    def diagnose(self, exc: RigError) -> tuple[str, str]: ...
+    async def on_failure_changed(self, code: str, message: str) -> None: ...
     async def on_online(self) -> None: ...
     async def on_stuck_tx(self, seconds: float) -> None: ...
 
@@ -110,13 +117,17 @@ class TelemetryPoller:
                 strength = None  # level not supported by this rig
         except RigError as exc:
             t.failures += 1
-            t.last_error = str(exc)
+            code, message = self.cb.diagnose(exc)
+            t.last_error = message
             th = s.offline_after_failures
             if t.failures >= th:
                 if not self._offline_announced:
                     self._offline_announced = True
-                    t.online = False
-                    await self.cb.on_offline(str(exc))
+                    t.online, t.failure = False, code
+                    await self.cb.on_offline(message)
+                elif code != t.failure:  # e.g. USB back, but rigctld still down
+                    t.failure = code
+                    await self.cb.on_failure_changed(code, message)
                 # cap the exponent: failures grows forever while the rig is gone, and
                 # 2 ** ~1030 no longer fits in a float
                 steps = min(t.failures - th + 1, 30)
@@ -127,6 +138,7 @@ class TelemetryPoller:
         was_online = t.online
         t.freq, t.mode, t.ptt, t.dcd, t.strength = freq, mode, ptt, dcd, strength
         t.failures, t.online, t.last_ok, t.last_error = 0, True, time.time(), None
+        t.failure = None
         self._offline_announced = False
         if ptt:
             if t.tx_since is None:

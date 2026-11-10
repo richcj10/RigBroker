@@ -7,6 +7,9 @@ radios:
     # audio (ALSA "Device"). rigctld itself runs from deploy/rigctld-vu.service.
     rigctld: 127.0.0.1:4542
     rigctld_service: rigctld-vu        # restarted during fault recovery
+    # USB interface checks, so the log says WHICH link failed (Digi-Rig gone vs rigctld
+    # down vs radio not answering). Read-only: never opens the serial port.
+    interface: {name: Digi-Rig, usb_serial: 9846aeb62cc6ef1188be69527a5e3baa, audio_card: Device}
     default_profile: aprs              # the default profile is always preemptible by a lease
     winlink_profile: winlink_pkt       # used by the "Start Winlink session" button
     profiles:

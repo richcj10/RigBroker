@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from pathlib import Path
 
 from rigbroker.jobs import MockJobRunner
 from rigbroker.leases import Verdict
@@ -437,3 +438,45 @@ async def test_long_offline_backoff_does_not_overflow(make: MakeHarness) -> None
     h.rig.offline = True
     delay = await h.radio.poller.poll_once()
     assert delay == h.radio.safety.poll_backoff_max_s
+
+
+async def test_offline_names_the_failure_point(make: MakeHarness) -> None:
+    h = await make(allow_tx=False)
+    await h.wait_state(S.DEFAULT)
+    await wait_until(lambda: h.radio.telemetry.online)
+    h.rig.offline = True
+    await wait_until(lambda: not h.radio.telemetry.online, what="offline detected")
+    assert h.radio.telemetry.failure is not None
+    msg = h.messages("rig_offline")[-1]
+    assert "rigctld not running" in msg or "radio not answering" in msg
+    h.rig.offline = False
+    await wait_until(lambda: h.radio.telemetry.online, what="online again")
+    assert h.radio.telemetry.failure is None
+
+
+async def test_unplugged_digirig_then_rigctld_still_down(make: MakeHarness, tmp_path: Path) -> None:
+    import shutil
+
+    from tests.test_hwcheck import make_probe
+
+    h = await make(allow_tx=False)
+    await h.wait_state(S.DEFAULT)
+    await wait_until(lambda: h.radio.telemetry.online)
+    h.radio.probe = make_probe(tmp_path)
+    assert h.radio.check_interface() == {"serial": True, "audio": True}
+    # unplug: serial chip + sound card vanish, rigctld exits
+    shutil.rmtree(tmp_path / "usb" / "3-2.1")
+    (tmp_path / "cards").write_text("")
+    h.rig.offline = True
+    await wait_until(lambda: not h.radio.telemetry.online, what="offline detected")
+    assert h.radio.telemetry.failure == "digirig_missing"
+    assert "Digi-Rig not detected on USB" in h.messages("rig_offline")[-1]
+    h.radio.check_interface()
+    assert h.messages("digirig_missing") and h.messages("digirig_audio_missing")
+    # plug back in, but rigctld hasn't restarted yet
+    (tmp_path / "usb" / "3-2.1").mkdir()
+    (tmp_path / "usb" / "3-2.1" / "serial").write_text("9846aeb62cc6ef1188be69527a5e3baa")
+    await wait_until(lambda: h.radio.telemetry.failure == "rigctld_down", what="rigctld_down")
+    assert any("rigctld not running" in m for m in h.messages("rigctld_down"))
+    h.rig.offline = False
+    await wait_until(lambda: h.radio.telemetry.online, what="online again")

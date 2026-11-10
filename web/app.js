@@ -163,8 +163,26 @@ function updateCard(id, r, mock) {
   f.lease.dataset.remaining = r.lease && r.lease.remaining_s != null ? r.lease.remaining_s : "";
   f.lease.dataset.holder = r.lease ? `${r.lease.holder} (${r.lease.priority})` : "";
 
-  setChip(f["h-civ"], t.polling ? (t.online ? "CI-V ok" : `CI-V offline${t.failures ? ` ×${t.failures}` : ""}`) : "CI-V idle (rig off)",
+  const FAIL = {
+    digirig_missing: "Digi-Rig not on USB",
+    rigctld_down: "rigctld down",
+    radio_not_answering: "radio not answering",
+    rig_error: "rig error",
+  };
+  const offlineText = t.failure ? FAIL[t.failure] || t.failure : "CI-V offline";
+  setChip(f["h-civ"], t.polling ? (t.online ? "CI-V ok" : `${offlineText}${t.failures ? ` ×${t.failures}` : ""}`) : "CI-V idle (rig off)",
     t.polling ? (t.online ? "ok" : "bad") : "");
+  const itf = t.interface;
+  if (f["h-if"]) {
+    f["h-if"].hidden = !itf || (itf.serial == null && itf.audio == null);
+    if (itf) {
+      const missing = [itf.serial === false && "serial", itf.audio === false && "audio"].filter(Boolean);
+      setChip(f["h-if"], missing.length ? `Digi-Rig: no ${missing.join(" + ")}` : "Digi-Rig ok",
+        missing.length ? "bad" : "ok");
+      f["h-if"].title = "USB serial (CI-V/PTT): " + (itf.serial == null ? "not checked" : itf.serial ? "present" : "MISSING")
+        + " | sound card: " + (itf.audio == null ? "not checked" : itf.audio ? "present" : "MISSING");
+    }
+  }
   if (f["h-civ"]) f["h-civ"].title = t.last_error || (t.last_ok ? `last ok ${fmtTime(t.last_ok)}` : "");
   setChip(f["h-svc"], r.consumer ? `${r.consumer} running` : "no consumer", r.consumer ? "ok" : "");
   setChip(f["h-tx"], r.allow_tx ? (r.fault ? "TX inhibited (fault)" : "TX allowed") : "TX disabled (--allow-tx off)",

@@ -19,6 +19,14 @@ from typing import Any, TypeVar
 
 from .config import Profile, RadioConfig, SafetyConfig
 from .events import EventLog, Level
+from .hwcheck import (
+    AUDIO_MISSING,
+    DIGIRIG_MISSING,
+    FAILURE_LABELS,
+    RIG_ERROR,
+    InterfaceProbe,
+    diagnose,
+)
 from .jobs import JobRunner
 from .leases import Decision, Holding, Lease, PlanStep, Priority, Verdict, arbitrate
 from .rig_client import RigClient, RigError
@@ -96,8 +104,10 @@ class RadioController:
         *,
         allow_tx: bool = False,
         attempt_listener: AttemptListener | None = None,
+        probe: InterfaceProbe | None = None,
     ) -> None:
         self.id = radio_id
+        self.probe = probe
         self.attempt_listener = attempt_listener
         self.cfg = cfg
         self.safety = safety
@@ -146,6 +156,7 @@ class RadioController:
             self._emit("rig", f"rigctld not reachable yet: {exc}", "warning")
         self._emit("boot", "waiting for the rig to answer before applying the default profile")
         await self.refresh_availability()
+        self.check_interface()
         self._spawn(self._availability_loop(), "availability")
         self._spawn(self._consumer_watchdog(), "consumer-watchdog")
         self._poll_task = self._spawn(self.poller.run(), "poller")
@@ -193,9 +204,34 @@ class RadioController:
         while True:
             await asyncio.sleep(self.CONSUMER_CHECK_S)
             try:
+                self.check_interface()
                 await self.check_consumer()
             except Exception:  # never let a watchdog bug kill the loop
                 log.exception("consumer watchdog failed; continuing")
+
+    def check_interface(self) -> dict[str, bool | None] | None:
+        """Track the USB interface's serial chip and sound card; log when either comes
+        or goes (a missing sound card stops Direwolf/VARA even while CI-V still works)."""
+        if self.probe is None:
+            return None
+        snap = self.probe.snapshot()
+        prev = self.telemetry.interface or {}
+        name = self.probe.cfg.name
+        if snap["serial"] is not None and snap["serial"] != prev.get("serial"):
+            if snap["serial"]:
+                self._emit("interface", f"{name} serial (CI-V/PTT) detected on USB")
+            else:
+                self._emit(DIGIRIG_MISSING, f"{name} serial (CI-V/PTT) NOT detected on USB "
+                           f"(serial {self.probe.cfg.usb_serial})", "error")
+        if snap["audio"] is not None and snap["audio"] != prev.get("audio"):
+            if snap["audio"]:
+                self._emit("interface", f"{name} sound card '{self.probe.cfg.audio_card}' "
+                           "detected")
+            else:
+                self._emit(AUDIO_MISSING, f"{name} sound card '{self.probe.cfg.audio_card}' "
+                           "NOT detected: Direwolf/VARA can't receive or transmit", "error")
+        self.telemetry.interface = snap
+        return snap
 
     async def check_consumer(self) -> str:
         """Notice a consumer that died on its own (e.g. Direwolf losing the sound card when
@@ -423,14 +459,24 @@ class RadioController:
                     > lease.duration_s + self.safety.lease_grace_s):
                 self._fire_locked(Ev.LEASE_EXPIRED, reason="lease max time reached (watchdog)")
 
+    def diagnose(self, exc: RigError) -> tuple[str, str]:
+        d = diagnose(exc, probe=self.probe, rigctld=self.cfg.rigctld, radio=self.cfg.name)
+        return d.code, d.message
+
+    async def on_failure_changed(self, code: str, message: str) -> None:
+        self._emit(code, f"still offline, now: {FAILURE_LABELS.get(code, code)} - {message}",
+                   "warning", failure=code)
+
     async def on_offline(self, reason: str) -> None:
+        code = self.telemetry.failure or RIG_ERROR
         async with self._lock:
-            self._emit("rig_offline", f"rig offline: {reason}", "warning")
+            self._emit("rig_offline", f"rig offline - {FAILURE_LABELS.get(code, code)}: {reason}",
+                       "warning", failure=code)
             self._fire_locked(Ev.RIG_OFFLINE, reason=f"rig offline while TX consumer running: "
                                                      f"{reason}")
 
     async def on_online(self) -> None:
-        self._emit("rig_online", "rig online")
+        self._emit("rig_online", "rig online: interface, rigctld and radio all answering")
         if self.state is RadioState.BOOT:
             await self._fire(Ev.START, reason="rig answered")
 

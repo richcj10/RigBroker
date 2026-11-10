@@ -11,6 +11,7 @@ from .aprs import AprsService
 from .config import Config
 from .direwolf import SERVICE_PREFIX, DirewolfManager
 from .events import EventLog
+from .hwcheck import InterfaceProbe
 from .jobs import JobRunner, MockJobRunner, SubprocessJobRunner
 from .kiss import AprsLink, KissTcpLink
 from .leases import PlanStep, Priority, Verdict
@@ -55,7 +56,9 @@ class Broker:
         self.radios: dict[str, RadioController] = {
             rid: RadioController(rid, rcfg, config.safety, rigs[rid], services, jobs,
                                  self.events, allow_tx=allow_tx,
-                                 attempt_listener=self._on_attempt)
+                                 attempt_listener=self._on_attempt,
+                                 probe=(InterfaceProbe(rcfg.interface)
+                                        if rcfg.interface and not mock else None))
             for rid, rcfg in config.enabled_radios().items()
         }
         self.direwolf: DirewolfManager | None = None
