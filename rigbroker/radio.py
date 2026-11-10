@@ -205,11 +205,15 @@ class RadioController:
         assert self.cfg.gps is not None
         while True:
             if self.telemetry.online:
+                fresh: Position | None = None
                 try:
-                    await self.read_gps()
+                    before = self.position
+                    pos = await self.read_gps()
+                    fresh = pos if pos is not before else None
                 except Exception:  # never let a GPS hiccup kill the loop
                     log.exception("GPS read failed; continuing")
-                await asyncio.sleep(self.cfg.gps.every_minutes * 60)
+                # retry soon until we have a fix (e.g. the first read hit a busy rigctld)
+                await asyncio.sleep(self.cfg.gps.every_minutes * 60 if fresh else 60)
             else:
                 await asyncio.sleep(5)  # first read as soon as the rig answers
 
