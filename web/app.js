@@ -67,6 +67,28 @@ async function api(method, path, body, { quiet = false } = {}) {
 }
 
 // ---------------------------------------------------------------- radio cards
+// TX power: one button per allowed level (from the config) for the profile on the rig
+function renderPower(id, r, f, prof) {
+  const levels = Object.entries(r.power_levels || {});
+  const name = r.applied_profile;
+  const show = levels.length > 0 && prof && prof.power != null && prof.transmits;
+  f.pwr.hidden = !show;
+  if (!show) return;
+  f["pwr-prof"].textContent = `(${name})`;
+  const key = `${name}|${levels.map(([k, v]) => k + v).join()}|${prof.power}`;
+  if (f.pwr.dataset.key === key) return;  // unchanged: keep the buttons
+  f.pwr.dataset.key = key;
+  f["pwr-btns"].replaceChildren(...levels.map(([lvl, v]) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "small" + (Math.abs(prof.power - v) < 0.02 ? " on" : "");
+    b.textContent = lvl;
+    b.title = `RFPOWER ${v}`;
+    b.addEventListener("click", () => api("POST", `/radios/${id}/power`, { profile: name, level: lvl }));
+    return b;
+  }));
+}
+
 function buildCard(id, r) {
   const el = $("#radio-tpl").content.firstElementChild.cloneNode(true);
   const f = {};
@@ -158,7 +180,9 @@ function updateCard(id, r, mock) {
   }
   f.profile.textContent = profText;
   if (r.applied_freq && live && t.freq !== r.applied_freq) f.freq.title = `verified ${fmtFreq(r.applied_freq)}`;
-  f.power.textContent = prof && prof.power != null ? `${Math.round(prof.power * 100)}%` : "—";
+  f.power.textContent = prof && prof.power != null
+    ? (prof.power_level ? `${prof.power_level} · ` : "") + `${Math.round(prof.power * 100)}%` : "—";
+  renderPower(id, r, f, prof);
   f.sql.textContent = prof && prof.squelch != null ? `${Math.round(prof.squelch * 100)}%` : "—";
   f.lease.dataset.remaining = r.lease && r.lease.remaining_s != null ? r.lease.remaining_s : "";
   f.lease.dataset.holder = r.lease ? `${r.lease.holder} (${r.lease.priority})` : "";

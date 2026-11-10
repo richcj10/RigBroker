@@ -171,6 +171,12 @@ class RadioConfig(_Strict):
         default=None, description="USB interface checks for clearer failure messages")
     gps: GpsConfig | None = Field(
         default=None, description="station position from the radio's GPS (map, distances)")
+    power_levels: dict[str, float] = Field(
+        default_factory=dict,
+        description="named RFPOWER levels the web UI may choose, e.g. {L: 0.165, M: 0.5, "
+                    "H: 0.835} (use the values the radio reads back)")
+    max_power_level: str | None = Field(
+        default=None, description="highest level the web UI may choose (default: any)")
     rigctld_service: str | None = Field(
         default=None, description="systemd unit restarted during fault recovery"
     )
@@ -208,7 +214,19 @@ class RadioConfig(_Strict):
             )
         if self.winlink_profile is not None and self.winlink_profile not in self.profiles:
             raise ValueError(f"winlink_profile {self.winlink_profile!r} is not one of the profiles")
+        for name, v in self.power_levels.items():
+            if not 0.0 <= v <= 1.0:
+                raise ValueError(f"power_levels.{name} must be 0..1, got {v}")
+        if self.max_power_level is not None and self.max_power_level not in self.power_levels:
+            raise ValueError(f"max_power_level {self.max_power_level!r} is not one of "
+                             f"power_levels ({', '.join(self.power_levels) or 'none'})")
         return self
+
+    def allowed_power_levels(self) -> dict[str, float]:
+        """The levels the web UI may choose (up to max_power_level), lowest first."""
+        cap = self.power_levels.get(self.max_power_level or "", 1.0)
+        return dict(sorted(((k, v) for k, v in self.power_levels.items() if v <= cap),
+                           key=lambda kv: kv[1]))
 
     @property
     def enabled(self) -> bool:
@@ -518,6 +536,8 @@ class Config(_Strict):
     security: SecurityConfig = Field(default_factory=SecurityConfig)
     aprs: AprsConfig | None = None
     direwolf: DirewolfConfig = Field(default_factory=DirewolfConfig)
+    power_file: str | None = Field(
+        default=None, description="where TX power levels chosen in the web UI are saved")
 
     @model_validator(mode="after")
     def _aprs_radio(self) -> Config:

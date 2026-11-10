@@ -357,3 +357,8 @@ details[open] > summary::before { content: "▾ "; }
   .log td:nth-child(3) { display: none; }
   .top { padding: 10px 12px; }
 }
+
+.pwr { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 4px 0 8px; }
+.pwr-label { font-size: 13px; color: var(--muted); }
+.pwr-btns { display: inline-flex; gap: 6px; }
+.pwr-btns button.on { border-color: var(--info); box-shadow: inset 0 0 0 1px var(--info); font-weight: 600; }

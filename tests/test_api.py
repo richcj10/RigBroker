@@ -241,3 +241,17 @@ def test_inject_refused_outside_mock() -> None:
     c = TestClient(create_app(broker, manage_lifecycle=False, auth_store=store),
                    headers={"Authorization": f"Bearer {token}"})
     assert c.post("/mock/vu/inject", json={"fault": "knob"}).status_code == 404
+
+
+def test_set_power_via_api(client: tuple[TestClient, Broker]) -> None:
+    c, _ = client
+    r = c.post("/radios/vu/power", json={"profile": "aprs", "level": "L"})
+    assert r.status_code == 200, r.text
+    st = c.get("/radios/vu").json()
+    assert st["profiles"]["aprs"]["power_level"] == "L"
+    assert st["power_levels"] == {"L": 0.2, "M": 0.5}
+    r = c.post("/radios/vu/power", json={"profile": "aprs", "level": "H"})
+    assert r.status_code == 409 and "capped" in r.json()["reason"]
+    c.post("/auth/logout")
+    assert c.post("/radios/vu/power", json={"profile": "aprs", "level": "M"}).status_code in (
+        401, 403)

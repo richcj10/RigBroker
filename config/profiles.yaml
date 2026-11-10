@@ -12,6 +12,11 @@ radios:
     interface: {name: Digi-Rig, usb_serial: 9846aeb62cc6ef1188be69527a5e3baa, audio_card: Device}
     # station position from the ID-4100's GPS (CI-V 0x23 0x00, read-only, kept in memory only)
     gps: {civ_address: 0x9A, every_minutes: 10}
+    # TX power the web UI may choose (values the ID-4100 reads back). Capped at M:
+    # at H the Pi and the radio's CI-V locked up (RF feedback) - raise the cap only after
+    # ferrites / antenna placement are sorted.
+    power_levels: {L: 0.165, M: 0.502, H: 0.835}
+    max_power_level: M
     default_profile: aprs              # the default profile is always preemptible by a lease
     winlink_profile: winlink_pkt       # used by the "Start Winlink session" button
     # power = RFPOWER 0..1, set on every tune and read back. The ID-4100 clamps anything
@@ -47,6 +52,9 @@ radios:
     rigctld: 127.0.0.1:4543
     default_profile: "off"
     profiles: {}                       # empty = not managed yet
+
+# TX power levels chosen in the web UI (per radio/profile) are saved here
+power_file: ~/.local/state/rigbroker/power.json
 
 safety:
   tx_holdoff_s: 2

@@ -108,6 +108,11 @@ class GatewayRequest(BaseModel):
     favorite: bool = True
 
 
+class PowerRequest(BaseModel):
+    profile: str = Field(max_length=40)
+    level: str = Field(max_length=10)
+
+
 class InjectRequest(BaseModel):
     fault: str
 
@@ -456,6 +461,13 @@ def create_app(broker: Broker, *, manage_lifecycle: bool = True,
         broker.events.emit("winlink_gateway",
                            f"{call.upper()} {'blocked' if req.value else 'unblocked'}")
         return {"ok": True, "blocked": req.value}
+
+    @control.post("/radios/{rid}/power")
+    async def set_power(rid: str, req: PowerRequest,
+                        who: Principal = Depends(require_control),  # noqa: B008
+    ) -> JSONResponse:
+        ok, msg = await radio(rid).set_power_level(req.profile, req.level, by=who.name)
+        return JSONResponse({"ok": ok, "reason": msg}, status_code=200 if ok else 409)
 
     @control.post("/radios/{rid}/fault/clear")
     async def fault_clear(rid: str) -> JSONResponse:

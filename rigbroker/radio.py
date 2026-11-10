@@ -30,6 +30,7 @@ from .hwcheck import (
 )
 from .jobs import JobRunner
 from .leases import Decision, Holding, Lease, PlanStep, Priority, Verdict, arbitrate
+from .power import PowerStore
 from .rig_client import RigClient, RigError
 from .services import ServiceController, ServiceError, restart
 from .state import Act, Ctx, Ev, RadioState, transition
@@ -106,9 +107,11 @@ class RadioController:
         allow_tx: bool = False,
         attempt_listener: AttemptListener | None = None,
         probe: InterfaceProbe | None = None,
+        power_store: PowerStore | None = None,
     ) -> None:
         self.id = radio_id
         self.probe = probe
+        self.power_store = power_store or PowerStore(None)
         self.attempt_listener = attempt_listener
         self.cfg = cfg
         self.safety = safety
@@ -422,6 +425,59 @@ class RadioController:
                 return True, "fault cleared; returning to default"
             return False, "fault clear refused"
 
+    # ------------------------------------------------------------------ TX power (web UI)
+
+    def power_level(self, profile: str) -> str | None:
+        """The level chosen in the UI for a profile, if it is still allowed."""
+        lvl = self.power_store.get(self.id, profile)
+        return lvl if lvl in self.cfg.allowed_power_levels() else None
+
+    def effective_profile(self, name: str) -> Profile:
+        """The profile with the UI-chosen power level applied (if any)."""
+        prof = self.cfg.profiles[name]
+        lvl = self.power_level(name)
+        if lvl is None or prof.power is None:
+            return prof
+        return prof.model_copy(update={"power": self.cfg.allowed_power_levels()[lvl]})
+
+    async def set_power_level(self, profile: str, level: str, *, by: str) -> tuple[bool, str]:
+        """Choose a named TX power level for a profile. Applied now if that profile is on
+        the rig (after the TX holdoff, then read back); otherwise on its next tune."""
+        allowed = self.cfg.allowed_power_levels()
+        prof = self.cfg.profiles.get(profile)
+        if prof is None:
+            return False, f"unknown profile {profile!r}"
+        if prof.power is None:
+            return False, f"profile {profile!r} doesn't set TX power"
+        if level not in allowed:
+            cap = self.cfg.max_power_level
+            return False, (f"level {level!r} not allowed (choose {', '.join(allowed) or 'none'}"
+                           + (f"; capped at {cap} in the config" if cap else "") + ")")
+        value = allowed[level]
+        async with self._lock:
+            self.power_store.set(self.id, profile, level)
+            live = (self.applied == profile
+                    and self.state in (RadioState.DEFAULT, RadioState.ACTIVE)
+                    and not self._rig_is_off())
+            if not live:
+                self._emit("power", f"{profile}: TX power {level} ({value:g}) set by {by}; "
+                           "used on its next tune")
+                return True, f"{profile} will use {level} on its next tune"
+            try:
+                await self._wait_tx_idle(self.safety.tx_holdoff_s)
+                await self.rig.set_level("RFPOWER", value)
+                got = await self.rig.get_level("RFPOWER")
+            except (RigError, SwitchAbort) as exc:
+                self._emit("power", f"{profile}: setting TX power {level} FAILED: {exc}", "error")
+                return False, f"couldn't set power: {exc}"
+            if abs(got - value) > self.safety.level_tolerance:
+                self._emit("power", f"{profile}: radio set {got:.3f} instead of {level} "
+                           f"({value:g}): fix power_levels in the config", "error")
+                return False, f"radio reads back {got:.3f}, not {value:g}"
+            self._emit("power", f"{profile}: TX power {level} ({value:g}) set by {by}, "
+                       f"radio reads {got:.3f}")
+            return True, f"{profile}: TX power now {level}"
+
     async def restart_consumer(self, reason: str) -> tuple[bool, str]:
         """Restart the running consumer (e.g. after a config change), safely.
 
@@ -461,6 +517,7 @@ class RadioController:
             "target_profile": self.target,
             "default_profile": self.cfg.default_profile,
             "winlink_profile": self.cfg.winlink_profile,
+            "power_levels": self.cfg.allowed_power_levels(),
             "lease": lease.to_dict() if lease else None,
             "queue": [q.to_dict() for q in self.queue],
             "consumer": self.consumer,
@@ -469,7 +526,9 @@ class RadioController:
             "last_fault": self.last_fault.to_dict() if self.last_fault else None,
             "telemetry": self.telemetry.to_dict(),
             "profiles": {
-                n: {"freq": p.freq, "mode": p.mode, "power": p.power, "squelch": p.squelch,
+                n: {"freq": p.freq, "mode": p.mode,
+                    "power": self.effective_profile(n).power,
+                    "power_level": self.power_level(n), "squelch": p.squelch,
                     "volume": p.volume,
                     "service": p.service, "run": p.run,
                     "transmits": p.transmits, "preemptible": p.preemptible,
@@ -777,7 +836,7 @@ class RadioController:
         if prev is not None:
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await prev
-        prof = self.cfg.profiles[target]
+        prof = self.effective_profile(target)
         freq = self._target_freq(target)
         is_default = target == self.cfg.default_profile
         t0 = time.monotonic()

@@ -18,6 +18,7 @@ from .leases import PlanStep, Priority, Verdict
 from .mock_aprs import MockAprsLink
 from .mock_rig import MockRig
 from .mock_sim import MockActivity
+from .power import PowerStore
 from .radio import LeaseResult, RadioController
 from .rig_client import RigClient, RigctldClient
 from .services import MockServiceController, ServiceController, SystemdServiceController
@@ -53,12 +54,17 @@ class Broker:
         if mock and state_file:
             state_file += ".mock"  # mock attempts must never pollute real gateway history
         self.planner = WinlinkPlanner(config.winlink, GatewayStore(state_file))
+        power_file = config.power_file
+        if mock and power_file:
+            power_file += ".mock"  # mock choices never change the real station's power
+        power_store = PowerStore(power_file)
         self.radios: dict[str, RadioController] = {
             rid: RadioController(rid, rcfg, config.safety, rigs[rid], services, jobs,
                                  self.events, allow_tx=allow_tx,
                                  attempt_listener=self._on_attempt,
                                  probe=(InterfaceProbe(rcfg.interface)
-                                        if rcfg.interface and not mock else None))
+                                        if rcfg.interface and not mock else None),
+                                 power_store=power_store)
             for rid, rcfg in config.enabled_radios().items()
         }
         self.direwolf: DirewolfManager | None = None

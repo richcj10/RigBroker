@@ -49,6 +49,8 @@ BASE: dict[str, Any] = {
             "rigctld": "127.0.0.1:4542",
             "rigctld_service": "rigctld-vu",
             "default_profile": "aprs",
+            "power_levels": {"L": 0.2, "M": 0.5, "H": 0.9},
+            "max_power_level": "M",
             "winlink_profile": "winlink_gw",
             "profiles": {
                 "aprs": {"freq": 144390000, "mode": "FM", "power": 0.5, "squelch": 0.15,
