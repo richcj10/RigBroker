@@ -889,21 +889,38 @@ class RadioController:
         while True:
             end = time.monotonic() + s.clear_channel_timeout_s
             clear_since: float | None = None
+            samples = busy_n = 0
+            strengths: list[float] = []
             while time.monotonic() < end:
                 busy = await self.rig.get_dcd()
                 now = time.monotonic()
+                samples += 1
                 if busy:
+                    busy_n += 1
                     clear_since = None
+                    if busy_n % 10 == 1:  # a few signal readings for the log
+                        with contextlib.suppress(RigError):
+                            strengths.append(await self.rig.get_level("STRENGTH"))
                 elif clear_since is None:
                     clear_since = now
                 if clear_since is not None and now - clear_since >= s.clear_channel_hold_s:
                     return
                 await asyncio.sleep(interval)
-            msg = f"channel busy for {s.clear_channel_timeout_s:g}s"
+            sq = await self._squelch_level()
+            sig = (f", signal {min(strengths):g}..{max(strengths):g} dB" if strengths else "")
+            msg = (f"channel busy for {s.clear_channel_timeout_s:g}s (squelch open in "
+                   f"{busy_n}/{samples} checks{sig}, squelch level {sq}): real traffic, "
+                   "or noise holding the squelch open - try a higher squelch for this profile")
             if not is_default:
                 raise ClearChannelTimeout(msg)
             self._emit("channel_busy", f"{msg}; default profile keeps waiting "
                        "(consumer not started yet)", "warning")
+
+    async def _squelch_level(self) -> str:
+        try:
+            return f"{await self.rig.get_level('SQL'):.2f}"
+        except RigError:
+            return "?"
 
     async def _start_consumer(self, prof: Profile) -> None:
         svc = prof.service
