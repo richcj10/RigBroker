@@ -30,7 +30,7 @@ def broker_tx() -> str:
             d = json.load(r)
         t = d["telemetry"]
         return f"{'TX' if t['ptt'] else 'rx'} ({d['state']}/{d['applied_profile']})"
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return f"? {exc}"
 
 

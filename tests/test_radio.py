@@ -396,3 +396,44 @@ async def test_status_snapshot(make: MakeHarness) -> None:
     assert st["state"] == "default" and st["applied_profile"] == "aprs"
     assert st["telemetry"]["freq"] == APRS and st["telemetry"]["online"] is True
     assert st["profiles"]["winlink_pkt"]["transmits"] is True
+
+
+async def test_consumer_that_dies_is_restarted_then_given_up(make: MakeHarness) -> None:
+    h = await make(allow_tx=False)
+    await h.wait_state(S.DEFAULT)
+    await wait_until(lambda: h.radio.telemetry.online)
+    assert h.radio.consumer == "direwolf@aprs-rx"
+    assert await h.radio.check_consumer() == "ok"
+    for _ in range(h.radio.CONSUMER_MAX_RESTARTS):
+        h.services.active.discard("direwolf@aprs-rx")  # e.g. the sound card vanished
+        assert await h.radio.check_consumer() == "restarted"
+        assert "direwolf@aprs-rx" in h.services.active
+    h.services.active.discard("direwolf@aprs-rx")
+    assert await h.radio.check_consumer() == "gave_up"
+    assert h.radio.consumer is None and "direwolf@aprs-rx" not in h.services.active
+    assert h.radio.state is S.DEFAULT  # not a fault: receive-only consumer
+
+
+async def test_dead_consumer_waits_while_rig_offline(make: MakeHarness) -> None:
+    h = await make(allow_tx=False)
+    await h.wait_state(S.DEFAULT)
+    await wait_until(lambda: h.radio.telemetry.online)
+    h.rig.offline = True
+    h.services.active.discard("direwolf@aprs-rx")
+    await wait_until(lambda: not h.radio.telemetry.online, what="offline detected")
+    assert await h.radio.check_consumer() == "waiting"
+    assert await h.radio.check_consumer() == "waiting"
+    assert len(h.messages("consumer_down")) == 1  # not repeated every check
+    h.rig.offline = False
+    await wait_until(lambda: h.radio.telemetry.online, what="online again")
+    assert await h.radio.check_consumer() == "restarted"
+    assert "direwolf@aprs-rx" in h.services.active
+
+
+async def test_long_offline_backoff_does_not_overflow(make: MakeHarness) -> None:
+    h = await make(allow_tx=False)
+    await h.wait_state(S.DEFAULT)
+    h.radio.poller.tel.failures = 5000  # rig unplugged for hours
+    h.rig.offline = True
+    delay = await h.radio.poller.poll_once()
+    assert delay == h.radio.safety.poll_backoff_max_s

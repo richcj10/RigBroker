@@ -117,8 +117,10 @@ class TelemetryPoller:
                     self._offline_announced = True
                     t.online = False
                     await self.cb.on_offline(str(exc))
-                return float(min(s.poll_interval_s * 2 ** (t.failures - th + 1),
-                                 s.poll_backoff_max_s))
+                # cap the exponent: failures grows forever while the rig is gone, and
+                # 2 ** ~1030 no longer fits in a float
+                steps = min(t.failures - th + 1, 30)
+                return float(min(s.poll_interval_s * 2 ** steps, s.poll_backoff_max_s))
             return s.poll_interval_s
 
         now = time.monotonic()

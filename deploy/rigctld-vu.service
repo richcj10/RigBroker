@@ -7,6 +7,9 @@
 [Unit]
 Description=rigctld for ID-4100A (RigBroker radio "vu")
 After=dev-ttyUSB0.device
+# Unplugging the Digirig makes rigctld exit with status 0, so restart on ANY exit,
+# forever (no start-rate limit); it comes back by itself once the USB is plugged in again.
+StartLimitIntervalSec=0
 
 [Service]
 Type=exec
@@ -16,7 +19,7 @@ ExecStart=/usr/bin/rigctld -m 3082 \
   -r /dev/serial/by-id/usb-Silicon_Labs_CP2102N_USB_to_UART_Bridge_Controller_9846aeb62cc6ef1188be69527a5e3baa-if00-port0 \
   -s 9600 -T 127.0.0.1 -t 4542 \
   --set-conf=civaddr=0x9A,ptt_type=RTS
-Restart=on-failure
+Restart=always
 RestartSec=5
 NoNewPrivileges=yes
 ProtectSystem=strict

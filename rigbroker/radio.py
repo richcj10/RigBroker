@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import time
 from collections import deque
 from collections.abc import Awaitable, Callable, Coroutine
@@ -24,6 +25,8 @@ from .rig_client import RigClient, RigError
 from .services import ServiceController, ServiceError, restart
 from .state import Act, Ctx, Ev, RadioState, transition
 from .telemetry import Sample, Telemetry, TelemetryPoller
+
+log = logging.getLogger("rigbroker.radio")
 
 T = TypeVar("T")
 
@@ -122,6 +125,8 @@ class RadioController:
         self._gen = 0
         self._pending: Lease | None = None
         self._fault_times: deque[float] = deque()
+        self._consumer_restarts: deque[float] = deque()
+        self._last_once: dict[str, str] = {}
         self._drift_warned = False
         self._tasks: set[asyncio.Task[Any]] = set()
         self._switch_task: asyncio.Task[None] | None = None
@@ -142,6 +147,7 @@ class RadioController:
         self._emit("boot", "waiting for the rig to answer before applying the default profile")
         await self.refresh_availability()
         self._spawn(self._availability_loop(), "availability")
+        self._spawn(self._consumer_watchdog(), "consumer-watchdog")
         self._poll_task = self._spawn(self.poller.run(), "poller")
 
     # ------------------------------------------------------------------ availability
@@ -179,6 +185,65 @@ class RadioController:
         while True:
             await asyncio.sleep(60)
             await self.refresh_availability()  # e.g. VARA installed later
+
+    CONSUMER_CHECK_S = 15.0
+    CONSUMER_MAX_RESTARTS = 3  # within safety.fault_window_s
+
+    async def _consumer_watchdog(self) -> None:
+        while True:
+            await asyncio.sleep(self.CONSUMER_CHECK_S)
+            try:
+                await self.check_consumer()
+            except Exception:  # never let a watchdog bug kill the loop
+                log.exception("consumer watchdog failed; continuing")
+
+    async def check_consumer(self) -> str:
+        """Notice a consumer that died on its own (e.g. Direwolf losing the sound card when
+        the Digirig is unplugged) and restart it, a few times at most. Returns what it did."""
+        async with self._lock:
+            svc = self.consumer
+            if svc is None or self.state not in (RadioState.DEFAULT, RadioState.ACTIVE):
+                return "idle"
+            try:
+                if await self.services.is_active(svc):
+                    return "ok"
+            except ServiceError:
+                return "unknown"
+            if not self.telemetry.online:
+                # rig unplugged too: restarting now would just fail again; retry once it's back
+                self._emit_once("consumer_down",
+                                f"{svc} stopped; will restart it when the rig is back", "warning")
+                return "waiting"
+            now = time.monotonic()
+            while self._consumer_restarts and now - self._consumer_restarts[0] > \
+                    self.safety.fault_window_s:
+                self._consumer_restarts.popleft()
+            if len(self._consumer_restarts) >= self.CONSUMER_MAX_RESTARTS:
+                self.consumer = None
+                self._emit("consumer_down", f"{svc} keeps stopping; gave up after "
+                           f"{self.CONSUMER_MAX_RESTARTS} restarts - check its log "
+                           f"(journalctl -u {svc}), then select the profile again", "error")
+                return "gave_up"
+            self._consumer_restarts.append(now)
+            try:
+                await self._wait_tx_idle(self.safety.tx_holdoff_s)
+                await self.services.start(svc)
+                if not await self.services.is_active(svc):
+                    raise ConsumerError(f"{svc} did not start")
+            except (RigError, ServiceError, SwitchAbort) as exc:
+                self._emit("consumer_down", f"{svc} stopped on its own; restart failed: {exc}",
+                           "error")
+                return "failed"
+            self._last_once.pop("consumer_down", None)
+            self._emit("consumer_restart", f"{svc} had stopped on its own; restarted it",
+                       "warning")
+            return "restarted"
+
+    def _emit_once(self, kind: str, message: str, level: Level = "info") -> None:
+        """Emit an event only when its message changes (avoid repeating every check)."""
+        if self._last_once.get(kind) != message:
+            self._last_once[kind] = message
+            self._emit(kind, message, level)
 
     async def stop(self) -> None:
         """Cancel all work, stop every consumer this radio owns, close the rig."""
