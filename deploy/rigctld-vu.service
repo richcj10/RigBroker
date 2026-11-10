@@ -4,11 +4,16 @@
 #
 # NOTE: each rigctld START briefly asserts RTS (= Digirig PTT) for ~55 ms before Hamlib
 # drops it (measured). Keep rigctld long-running; restart it as rarely as possible.
+#
+# Tied to the Digi-Rig's USB serial device: when it is unplugged (or drops off USB)
+# systemd stops rigctld (otherwise it can hang on the dead port), and when it comes
+# back systemd starts rigctld again. Device unit name from:
+#   systemd-escape -p --suffix=device /dev/serial/by-id/usb-Silicon_Labs_...-port0
 [Unit]
 Description=rigctld for ID-4100A (RigBroker radio "vu")
-After=dev-ttyUSB0.device
-# Unplugging the Digirig makes rigctld exit with status 0, so restart on ANY exit,
-# forever (no start-rate limit); it comes back by itself once the USB is plugged in again.
+BindsTo=dev-serial-by\x2did-usb\x2dSilicon_Labs_CP2102N_USB_to_UART_Bridge_Controller_9846aeb62cc6ef1188be69527a5e3baa\x2dif00\x2dport0.device
+After=dev-serial-by\x2did-usb\x2dSilicon_Labs_CP2102N_USB_to_UART_Bridge_Controller_9846aeb62cc6ef1188be69527a5e3baa\x2dif00\x2dport0.device
+# also restart on any exit of its own, forever (no start-rate limit)
 StartLimitIntervalSec=0
 
 [Service]
@@ -27,4 +32,5 @@ ProtectHome=yes
 PrivateTmp=yes
 
 [Install]
-WantedBy=multi-user.target
+# started at boot, and again whenever the Digi-Rig's serial device appears
+WantedBy=multi-user.target dev-serial-by\x2did-usb\x2dSilicon_Labs_CP2102N_USB_to_UART_Bridge_Controller_9846aeb62cc6ef1188be69527a5e3baa\x2dif00\x2dport0.device

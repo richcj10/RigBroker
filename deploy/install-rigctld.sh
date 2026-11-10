@@ -10,7 +10,13 @@ command -v rigctld >/dev/null || { echo "rigctld missing: apt-get install libham
 
 install -m 0644 rigctld-vu.service /etc/systemd/system/rigctld-vu.service
 systemctl daemon-reload
-systemctl enable rigctld-vu.service
+systemctl enable rigctld-vu.service   # also starts it whenever the Digi-Rig appears
+DEV=/dev/serial/by-id/usb-Silicon_Labs_CP2102N_USB_to_UART_Bridge_Controller_9846aeb62cc6ef1188be69527a5e3baa-if00-port0
+if [ ! -e "$DEV" ]; then
+  echo "Digi-Rig not on USB right now: rigctld will start by itself when it is plugged in"
+  systemctl --no-pager is-enabled rigctld-vu.service
+  exit 0
+fi
 systemctl restart rigctld-vu.service
 
 echo "waiting for rigctld to listen on 127.0.0.1:4542 ..."
