@@ -492,7 +492,8 @@ class RadioController:
                         f"(profile {self.applied}, consumer {self.consumer or 'none'}): "
                         "keyed outside RigBroker?"))
                     return
-                self._check_drift(sample)
+                if sample.fresh:  # cached readings can predate a switch: never judge them
+                    self._check_drift(sample)
             lease = self.lease
             if (self.state is RadioState.ACTIVE and lease is not None
                     and lease.started_mono is not None
@@ -870,9 +871,11 @@ class RadioController:
         s = self.safety
         bad: list[str] = []
         freq = await self.rig.get_freq()
+        self.telemetry.freq = freq  # light polls reuse this until the next full poll
         if want_freq is not None and abs(freq - want_freq) > s.freq_tolerance_hz:
             bad.append(f"freq {freq} != {want_freq}")
         mode, _ = await self.rig.get_mode()
+        self.telemetry.mode = mode
         if prof.mode is not None and mode != prof.mode:
             bad.append(f"mode {mode} != {prof.mode}")
         if prof.power is not None:

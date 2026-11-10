@@ -30,7 +30,8 @@ radios:
       #   VARA FM: TCP       192.168.5.157:8300   (vara-fm; PTT via virtual COM -> rigctld)
       # winlink_pkt tunes to the gateway picked in the Winlink gateways panel / planner.
       # The ID-4100 is dual band: 2 m and 70 cm packet gateways are both allowed.
-      winlink_pkt: {freq: 145050000, mode: FM, power: 0.5, squelch: 0.15, volume: 0.12, service: direwolf@pkt,
+      # squelch 0.30: at 0.15, 70 cm noise held the squelch open (clear-channel timeout).
+      winlink_pkt: {freq: 145050000, mode: FM, power: 0.5, squelch: 0.30, volume: 0.12, service: direwolf@pkt,
                     winlink_mode: packet, freq_ranges: [[144000000, 148000000], [420000000, 450000000]],
                     max_minutes: 30, transmits: true}
       vara_fm:     {freq: 145090000, mode: FM, power: 0.5, squelch: 0.15, volume: 0.12, service: vara-fm, max_minutes: 30, transmits: true}

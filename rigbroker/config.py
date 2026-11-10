@@ -242,6 +242,8 @@ class SafetyConfig(_Strict):
     stuck_tx_s: float = Field(default=90.0, gt=0)
     poll_interval_s: float = Field(default=1.0, gt=0)
     poll_backoff_max_s: float = Field(default=10.0, gt=0)
+    full_poll_every: int = Field(
+        default=5, ge=1, description="read freq/mode/DCD/S-meter every Nth poll (PTT always)")
     offline_after_failures: int = Field(default=3, ge=1)
     rig_timeout_s: float = Field(default=2.0, gt=0)
     power_on_timeout_s: float = Field(default=10.0, gt=0)

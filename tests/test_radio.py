@@ -506,3 +506,29 @@ async def test_profile_volume_is_set_on_tune(make: MakeHarness) -> None:
     assert (await h.radio.request_lease("monitor", holder="web")).ok
     await h.wait_state(S.ACTIVE)
     assert h.rig.levels["AF"] == 0.2
+
+
+async def test_light_polls_read_only_ptt(make: MakeHarness) -> None:
+    h = await make(allow_tx=False)
+    await h.wait_state(S.DEFAULT)
+    await wait_until(lambda: h.radio.telemetry.online)
+    p = h.radio.poller
+    p._cycle = 1  # next poll is a light one (full_poll_every = 5)
+    h.rig.calls.clear()
+    await p.poll_once()
+    assert [c[0] for c in h.rig.calls] == ["get_ptt"]
+    p._cycle = 0
+    h.rig.calls.clear()
+    await p.poll_once()
+    names = [c[0] for c in h.rig.calls]
+    assert names[:4] == ["get_freq", "get_mode", "get_ptt", "get_dcd"]
+
+
+async def test_unexpected_tx_still_caught_on_light_polls(make: MakeHarness) -> None:
+    h = await make(allow_tx=False)
+    await h.wait_state(S.DEFAULT)
+    await wait_until(lambda: h.radio.telemetry.online)
+    h.radio.poller._cycle = 1
+    h.rig.ptt = True  # keyed outside the broker
+    await h.wait_state(S.FAULT)
+    assert h.radio.fault is not None and "outside RigBroker" in h.radio.fault.reason

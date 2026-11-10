@@ -52,6 +52,7 @@ class Sample:
     ptt: bool
     dcd: bool
     strength: float | None
+    fresh: bool = True  # False on a light poll: freq/mode/dcd/strength are the last readings
 
 
 class PollerCallbacks(Protocol):
@@ -81,6 +82,7 @@ class TelemetryPoller:
         self.cb = cb
         self._offline_announced = False
         self._stuck_reported = False
+        self._cycle = 0
 
     async def run(self) -> None:
         """Poll forever (cancel to stop). A bug in one poll never kills the poller."""
@@ -103,18 +105,26 @@ class TelemetryPoller:
             return s.poll_interval_s
         t.polling = True
         started = time.monotonic()
+        # PTT every poll (stuck/unexpected-TX watchdogs); the rest only every Nth poll, so
+        # rigctld's single command queue stays free for a modem's PTT on/off (a PTT
+        # command stuck behind CI-V reads keys the radio late and clips the packet)
+        full = (self._cycle % s.full_poll_every == 0 or not t.online or t.freq is None
+                or t.mode is None)
+        self._cycle += 1
         try:
-            freq = await self.rig.get_freq()
-            mode, _ = await self.rig.get_mode()
+            if full:
+                freq = await self.rig.get_freq()
+                mode, _ = await self.rig.get_mode()
             ptt = await self.rig.get_ptt()
-            dcd = await self.rig.get_dcd()
             strength: float | None
-            try:
-                strength = await self.rig.get_level("STRENGTH")
-            except (RigTimeout, RigConnectionError):
-                raise
-            except RigError:
-                strength = None  # level not supported by this rig
+            if full:
+                dcd = await self.rig.get_dcd()
+                try:
+                    strength = await self.rig.get_level("STRENGTH")
+                except (RigTimeout, RigConnectionError):
+                    raise
+                except RigError:
+                    strength = None  # level not supported by this rig
         except RigError as exc:
             t.failures += 1
             code, message = self.cb.diagnose(exc)
@@ -136,7 +146,12 @@ class TelemetryPoller:
 
         now = time.monotonic()
         was_online = t.online
-        t.freq, t.mode, t.ptt, t.dcd, t.strength = freq, mode, ptt, dcd, strength
+        if full:
+            t.freq, t.mode, t.dcd, t.strength = freq, mode, dcd, strength
+        else:  # light poll: reuse the last full readings
+            assert t.freq is not None and t.mode is not None
+            freq, mode, dcd, strength = t.freq, t.mode, bool(t.dcd), t.strength
+        t.ptt = ptt
         t.failures, t.online, t.last_ok, t.last_error = 0, True, time.time(), None
         t.failure = None
         self._offline_announced = False
@@ -152,5 +167,5 @@ class TelemetryPoller:
             self._stuck_reported = False
         if not was_online:
             await self.cb.on_online()
-        await self.cb.on_sample(Sample(started, freq, mode, ptt, dcd, strength))
+        await self.cb.on_sample(Sample(started, freq, mode, ptt, dcd, strength, fresh=full))
         return s.poll_interval_s
