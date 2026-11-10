@@ -56,6 +56,10 @@ class Profile(_Strict):
     mode: str | None = None
     power: float | None = Field(default=None, ge=0.0, le=1.0, description="RFPOWER level 0..1")
     squelch: float | None = Field(default=None, ge=0.0, le=1.0, description="SQL level 0..1")
+    volume: float | None = Field(
+        default=None, ge=0.0, le=1.0,
+        description="AF level 0..1; sets the RX audio to the modem when it comes from the "
+                    "speaker jack (set on every tune, so a bumped knob can't silence it)")
     service: str | None = None
     rx_service: str | None = Field(
         default=None,
@@ -98,9 +102,10 @@ class Profile(_Strict):
                 raise ValueError("a profile with rig_power: off cannot transmit")
             if self.run:
                 raise ValueError("a profile with rig_power: off cannot have a run command")
-            if any(v is not None for v in (self.freq, self.mode, self.power, self.squelch)):
+            if any(v is not None for v in (self.freq, self.mode, self.power, self.squelch,
+                                           self.volume)):
                 raise ValueError(
-                    "a profile with rig_power: off must not set freq/mode/power/squelch"
+                    "a profile with rig_power: off must not set freq/mode/power/squelch/volume"
                 )
         elif self.freq is None or self.mode is None:
             raise ValueError("freq and mode are required (unless rig_power: off)")
@@ -148,6 +153,15 @@ class InterfaceConfig(_Strict):
         default=None, description="ALSA card id of its sound card, e.g. 'Device'")
 
 
+class GpsConfig(_Strict):
+    """Read the station position from the radio's built-in GPS (Icom CI-V 0x23 0x00).
+
+    Read-only; the position is kept in memory only (never written to config or git)."""
+
+    civ_address: int = Field(ge=0, le=0xFF, description="the radio's CI-V address, e.g. 0x9A")
+    every_minutes: float = Field(default=10.0, gt=0)
+
+
 class RadioConfig(_Strict):
     """One radio: its rigctld endpoint, profiles and default profile."""
 
@@ -155,6 +169,8 @@ class RadioConfig(_Strict):
     rigctld: str = Field(description="host:port of this radio's rigctld")
     interface: InterfaceConfig | None = Field(
         default=None, description="USB interface checks for clearer failure messages")
+    gps: GpsConfig | None = Field(
+        default=None, description="station position from the radio's GPS (map, distances)")
     rigctld_service: str | None = Field(
         default=None, description="systemd unit restarted during fault recovery"
     )

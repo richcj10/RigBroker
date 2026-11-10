@@ -76,7 +76,10 @@ class Broker:
     # ---------------------------------------------------------------- APRS gates
 
     def station_position(self) -> tuple[float, float] | None:
-        """Beacon position from the Direwolf settings, else the Winlink grid square."""
+        """The APRS radio's GPS, else the Direwolf beacon position, else the Winlink grid."""
+        radio = self.radios.get(self.config.aprs.radio) if self.config.aprs else None
+        if radio is not None and radio.position is not None:
+            return radio.position.lat, radio.position.lon
         if self.direwolf is not None:
             s = self.direwolf.settings
             if s.lat is not None and s.lon is not None:

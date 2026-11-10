@@ -480,3 +480,29 @@ async def test_unplugged_digirig_then_rigctld_still_down(make: MakeHarness, tmp_
     assert any("rigctld not running" in m for m in h.messages("rigctld_down"))
     h.rig.offline = False
     await wait_until(lambda: h.radio.telemetry.online, what="online again")
+
+
+async def test_gps_position_read_from_radio(make: MakeHarness) -> None:
+    from rigbroker.config import GpsConfig
+    from tests.test_gps import ANSWER
+
+    h = await make(allow_tx=False)
+    await h.wait_state(S.DEFAULT)
+    await wait_until(lambda: h.radio.telemetry.online)
+    h.radio.cfg = h.radio.cfg.model_copy(update={"gps": GpsConfig(civ_address=0x9A)})
+    assert await h.radio.read_gps() is None
+    assert any("not available" in m for m in h.messages("gps"))
+    h.rig.raw_reply = ANSWER
+    p = await h.radio.read_gps()
+    assert p is not None and h.radio.position == p
+    assert any("grid FN20xq" in m for m in h.messages("gps"))
+    assert not any("40.6" in m for m in h.messages("gps"))  # exact position never logged
+
+
+async def test_profile_volume_is_set_on_tune(make: MakeHarness) -> None:
+    h = await make(allow_tx=False)
+    await h.wait_state(S.DEFAULT)
+    h.rig.levels["AF"] = 0.0  # someone turned the volume knob down
+    assert (await h.radio.request_lease("monitor", holder="web")).ok
+    await h.wait_state(S.ACTIVE)
+    assert h.rig.levels["AF"] == 0.2

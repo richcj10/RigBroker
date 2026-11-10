@@ -19,6 +19,7 @@ from typing import Any, TypeVar
 
 from .config import Profile, RadioConfig, SafetyConfig
 from .events import EventLog, Level
+from .gps import REPLY_LEN, Position, parse_position, request, to_grid
 from .hwcheck import (
     AUDIO_MISSING,
     DIGIRIG_MISSING,
@@ -130,6 +131,7 @@ class RadioController:
         self.telemetry = Telemetry()
         self.poller = TelemetryPoller(rig, safety, self.telemetry, self)
         self.unavailable: dict[str, str] = {}  # profile -> why it can't run right now
+        self.position: Position | None = None  # from the radio's GPS (cfg.gps)
 
         self._lock = asyncio.Lock()
         self._gen = 0
@@ -159,6 +161,8 @@ class RadioController:
         self.check_interface()
         self._spawn(self._availability_loop(), "availability")
         self._spawn(self._consumer_watchdog(), "consumer-watchdog")
+        if self.cfg.gps is not None:
+            self._spawn(self._gps_loop(), "gps")
         self._poll_task = self._spawn(self.poller.run(), "poller")
 
     # ------------------------------------------------------------------ availability
@@ -196,6 +200,42 @@ class RadioController:
         while True:
             await asyncio.sleep(60)
             await self.refresh_availability()  # e.g. VARA installed later
+
+    async def _gps_loop(self) -> None:
+        assert self.cfg.gps is not None
+        while True:
+            if self.telemetry.online:
+                try:
+                    await self.read_gps()
+                except Exception:  # never let a GPS hiccup kill the loop
+                    log.exception("GPS read failed; continuing")
+                await asyncio.sleep(self.cfg.gps.every_minutes * 60)
+            else:
+                await asyncio.sleep(5)  # first read as soon as the rig answers
+
+    async def read_gps(self) -> Position | None:
+        """Ask the radio for its GPS position (read-only CI-V query via rigctld).
+        Waits for any switch in progress; never runs while the radio is transmitting."""
+        if self.cfg.gps is None:
+            return None
+        civ = self.cfg.gps.civ_address
+        async with self._lock:
+            if self.telemetry.ptt:
+                return self.position
+            try:
+                raw = await self.rig.send_raw(request(civ), REPLY_LEN)
+            except RigError as exc:
+                self._emit_once("gps", f"GPS position not available: {exc}", "warning")
+                return self.position
+        pos = parse_position(raw, civ)
+        if pos is None:
+            self._emit_once("gps", "radio GPS has no fix yet", "warning")
+            return self.position
+        if self.position is None:  # log the grid square only, not exact coordinates
+            self._emit_once("gps", f"station position from the radio's GPS: grid "
+                            f"{to_grid(pos.lat, pos.lon)}")
+        self.position = pos
+        return pos
 
     CONSUMER_CHECK_S = 15.0
     CONSUMER_MAX_RESTARTS = 3  # within safety.fault_window_s
@@ -426,6 +466,7 @@ class RadioController:
             "telemetry": self.telemetry.to_dict(),
             "profiles": {
                 n: {"freq": p.freq, "mode": p.mode, "power": p.power, "squelch": p.squelch,
+                    "volume": p.volume,
                     "service": p.service, "run": p.run,
                     "transmits": p.transmits, "preemptible": p.preemptible,
                     "max_minutes": p.max_minutes, "rig_power": p.rig_power,
@@ -809,6 +850,8 @@ class RadioController:
             await self.rig.set_level("RFPOWER", prof.power)
         if prof.squelch is not None:
             await self.rig.set_level("SQL", prof.squelch)
+        if prof.volume is not None:
+            await self.rig.set_level("AF", prof.volume)
 
     async def _wait_rig_ready(self) -> None:
         deadline = time.monotonic() + self.safety.power_on_timeout_s

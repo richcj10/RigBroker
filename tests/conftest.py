@@ -62,7 +62,7 @@ BASE: dict[str, Any] = {
                                 "max_minutes": 10, "transmits": True},
                 "vara_fm": {"freq": 145090000, "mode": "FM", "power": 0.5, "squelch": 0.15,
                             "service": "vara-fm", "max_minutes": 15, "transmits": True},
-                "monitor": {"freq": 147240000, "mode": "FM", "squelch": 0.15,
+                "monitor": {"freq": 147240000, "mode": "FM", "squelch": 0.15, "volume": 0.2,
                             "service": "audio-stream", "max_minutes": 60},
                 "winlink_gw": {"freq": 145050000, "mode": "FM", "power": 0.5, "squelch": 0.15,
                                "service": "direwolf@pkt", "run": "pat connect ax25:///{call}",

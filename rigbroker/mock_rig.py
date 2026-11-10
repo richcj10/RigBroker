@@ -32,6 +32,7 @@ class MockRig:
         self.connected = False
         self.latency = latency
         self.offline = False
+        self.raw_reply: bytes | None = None  # e.g. a GPS answer
         self.timeouts_remaining = 0
         self.timeout_s = 0.01
         self.readback_override: dict[str, Any] = {}
@@ -116,3 +117,9 @@ class MockRig:
     async def get_info(self) -> str:
         await self._call("get_info")
         return "MockRig"
+
+    async def send_raw(self, data: bytes, reply_len: int) -> bytes:
+        await self._call("send_raw")
+        if self.raw_reply is None:
+            raise RigError("send_raw failed: RPRT -11", -11)
+        return data + self.raw_reply

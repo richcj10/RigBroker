@@ -10,14 +10,18 @@ radios:
     # USB interface checks, so the log says WHICH link failed (Digi-Rig gone vs rigctld
     # down vs radio not answering). Read-only: never opens the serial port.
     interface: {name: Digi-Rig, usb_serial: 9846aeb62cc6ef1188be69527a5e3baa, audio_card: Device}
+    # station position from the ID-4100's GPS (CI-V 0x23 0x00, read-only, kept in memory only)
+    gps: {civ_address: 0x9A, every_minutes: 10}
     default_profile: aprs              # the default profile is always preemptible by a lease
     winlink_profile: winlink_pkt       # used by the "Start Winlink session" button
     # power = RFPOWER 0..1, set on every tune and read back. The ID-4100 clamps anything
-    # below 0.165 (raw 42/255) to 0.165, its minimum: use 0.165 for low-power bring-up;
-    # raise it once TX is verified on the dummy load.
+    # below 0.165 (raw 42/255) to 0.165 = L (low). 0.50 = M (mid, confirmed on the display).
+    # TX profiles run at M after the low-power dummy-load and RX tests (2026-11-10).
+    # volume = AF 0..1: RX audio to the Digi-Rig comes from the speaker jack, so it follows
+    # the volume; 0.12 + Digi-Rig capture 29 gives Direwolf ~50. Set on every tune.
     profiles:
       # without --allow-tx, APRS runs the receive-only direwolf@aprs-rx (no PTT line at all)
-      aprs:        {freq: 144390000, mode: FM, power: 0.165, squelch: 0.15, service: direwolf@aprs,
+      aprs:        {freq: 144390000, mode: FM, power: 0.5, squelch: 0.15, volume: 0.12, service: direwolf@aprs,
                     rx_service: direwolf@aprs-rx, preemptible: true, transmits: true}
       # Winlink sessions for Winlink Express on the PC (remote client, no job on the Pi):
       # the broker tunes + verifies, starts the modem, and holds the radio until Release
@@ -25,11 +29,12 @@ radios:
       #   packet:  KISS TCP  192.168.5.157:8010   (direwolf@pkt)
       #   VARA FM: TCP       192.168.5.157:8300   (vara-fm; PTT via virtual COM -> rigctld)
       # winlink_pkt tunes to the gateway picked in the Winlink gateways panel / planner.
-      winlink_pkt: {freq: 145050000, mode: FM, power: 0.165, squelch: 0.15, service: direwolf@pkt,
-                    winlink_mode: packet, freq_ranges: [[144000000, 148000000]],
+      # The ID-4100 is dual band: 2 m and 70 cm packet gateways are both allowed.
+      winlink_pkt: {freq: 145050000, mode: FM, power: 0.5, squelch: 0.15, volume: 0.12, service: direwolf@pkt,
+                    winlink_mode: packet, freq_ranges: [[144000000, 148000000], [420000000, 450000000]],
                     max_minutes: 30, transmits: true}
-      vara_fm:     {freq: 145090000, mode: FM, power: 0.165, squelch: 0.15, service: vara-fm, max_minutes: 30, transmits: true}
-      monitor:     {freq: 147240000, mode: FM, squelch: 0.15, service: audio-stream, max_minutes: 60, transmits: false}
+      vara_fm:     {freq: 145090000, mode: FM, power: 0.5, squelch: 0.15, volume: 0.12, service: vara-fm, max_minutes: 30, transmits: true}
+      monitor:     {freq: 147240000, mode: FM, squelch: 0.15, volume: 0.12, service: audio-stream, max_minutes: 60, transmits: false}
       # No "off" profile: Hamlib's ID-4100 driver can't power the radio off over CI-V
       # (set_powerstat -> RPRT -11). For a radio that can, add:
       #   "off": {service: null, rig_power: "off", transmits: false}   # quote off/on/yes/no!
@@ -98,7 +103,7 @@ winlink:
   attempt_minutes: 4                 # per-gateway limit (lease max_minutes still applies)
   state_file: ~/.local/state/rigbroker/winlink.json
   band_preference: {day: [20m, 30m, 40m], night: [80m, 40m, 30m]}   # HF only
-  gateways:                          # PLACEHOLDERS - replace with real gateways you trust
-    - {call: N0CALL-10, freq: 145050000, mode: packet, grid: null, favorite: true, note: "known good (placeholder)"}
-    - {call: N1CALL-10, freq: 145070000, mode: packet, grid: null, note: "backup (placeholder)"}
-    - {call: N2CALL-10, freq: 145010000, mode: packet, grid: null, note: "far, sometimes (placeholder)"}
+  # Add your local gateways in the web UI (Station > Winlink gateways > + Add gateway):
+  # they are saved in state_file on the Pi, not in this (public) file. Find them with
+  # Winlink Express > Packet Winlink > Channel Selection (sorted by distance).
+  gateways: []

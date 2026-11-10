@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import re
 from typing import Protocol, runtime_checkable
 
 LEVELS = ("RFPOWER", "SQL", "AF", "STRENGTH")
@@ -46,6 +47,7 @@ class RigClient(Protocol):
     async def get_powerstat(self) -> bool: ...
     async def set_powerstat(self, on: bool) -> None: ...
     async def get_info(self) -> str: ...
+    async def send_raw(self, data: bytes, reply_len: int) -> bytes: ...
 
 
 def _value(line: str) -> str:
@@ -183,3 +185,14 @@ class RigctldClient:
     async def get_info(self) -> str:
         lines = await self._cmd("get_info")
         return " ".join(_value(x) for x in lines)
+
+    async def send_raw(self, data: bytes, reply_len: int) -> bytes:
+        """Send raw bytes to the rig through rigctld (send_cmd_rx) and return exactly
+        ``reply_len`` bytes of reply (for an Icom: our echoed command + the answer).
+        Only for READ commands such as the GPS query."""
+        arg = "".join(f"\\0x{b:02X}" for b in data)
+        lines = await self._cmd("send_cmd_rx", arg, str(reply_len))
+        for line in lines:
+            if line.startswith("Reply:"):
+                return bytes(int(h, 16) for h in re.findall(r"\\0x([0-9A-Fa-f]{2})", line))
+        raise RigError(f"send_cmd_rx: no reply in {lines!r}")

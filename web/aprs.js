@@ -4,7 +4,7 @@
 // or as DOM nodes (never innerHTML), including Leaflet tooltips and popups.
 (() => {
   const S = { status: null, stations: new Map(), messages: new Map(), packets: [], bulletins: new Map(), unread: 0, tab: "map" };
-  let map = null, layer = null, meMarker = null, fitted = false;
+  let map = null, layer = null, meMarker = null, fitted = false, centered = false;
   const markers = new Map();
   const MAX_PKTS = 300;
   const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
@@ -66,7 +66,8 @@
     }).addTo(map);
     layer = L.layerGroup().addTo(map);
     const p = S.status && S.status.position;
-    map.setView(p || [37, -86], p ? 10 : 6);
+    map.setView(p || [37, -86], p ? 11 : 6);
+    centered = !!p;
     $("#map-note").textContent = "Stations heard directly or via digipeaters on RF. Click one for details.";
   }
   function kindColor(s) {
@@ -114,6 +115,10 @@
     if (!map || !S.status) return;
     const p = S.status.position;
     if (!p) return;
+    if (!centered && !fitted) {  // position arrived after the map was drawn (radio GPS)
+      map.setView(p, 11);
+      centered = true;
+    }
     if (!meMarker) {
       meMarker = L.circleMarker(p, { radius: 9, weight: 3, color: "#b86e0a", fillColor: "#e8a33d", fillOpacity: 0.9 }).addTo(map);
       meMarker.bindTooltip(el("span", null, `${S.status.callsign} (this station)`), { permanent: false });
