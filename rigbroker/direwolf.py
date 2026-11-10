@@ -81,7 +81,9 @@ def render(s: DirewolfSettings, callsign: str, instance: Instance, *,
     if instance == "pkt":
         # AGW for local clients; KISS on its own port for Winlink Express over the LAN
         # (deliberately not the APRS kiss_port, so the broker's APRS link never attaches)
-        lines += [f"AGWPORT {s.agw_port}", f"KISSPORT {s.pkt_kiss_port}"]
+        # "KISSPORT 0" first: Direwolf 1.7 otherwise ALSO opens its default 8001 (measured),
+        # and the APRS link would attach to the packet modem
+        lines += [f"AGWPORT {s.agw_port}", "KISSPORT 0", f"KISSPORT {s.pkt_kiss_port}"]
         return "\n".join(lines) + "\n"
 
     lines += ["AGWPORT 0", f"KISSPORT {s.kiss_port}"]

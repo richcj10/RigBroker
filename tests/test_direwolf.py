@@ -46,6 +46,8 @@ def test_render_quiet_and_packet_instances() -> None:
     pkt = render(s, CALL, "pkt")
     # KISS on its own port for Winlink Express over the LAN
     assert "AGWPORT 8000" in pkt and "KISSPORT 8010" in pkt and "PTT RIG 2" in pkt
+    assert pkt.index("KISSPORT 0") < pkt.index("KISSPORT 8010")  # no default 8001
+    assert "KISSPORT 8001" not in pkt
     assert "PBEACON" not in pkt and "DIGIPEAT" not in pkt
     assert "IGSERVER" not in pkt and "IGLOGIN" not in pkt
 
