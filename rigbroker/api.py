@@ -37,8 +37,10 @@ from starlette.requests import HTTPConnection
 from . import __version__
 from .aprs import AprsError, AprsService, validate_text
 from .auth import COOKIE, CSRF_HEADER, AuthError, AuthStore, LoginLimiter, Principal, Role, User
+from .bbs import MAX_LINE as MAX_BBS_LINE
+from .bbs import BbsError, BbsService
 from .broker import Broker
-from .config import WinlinkMode, normalize_call
+from .config import BbsEntry, WinlinkMode, normalize_call
 from .direwolf import INSTANCES, SERVICE_PREFIX, DirewolfManager, SettingsError
 from .leases import Verdict
 from .radio import LeaseResult, RadioController
@@ -118,6 +120,22 @@ class PowerRequest(BaseModel):
 
 class InjectRequest(BaseModel):
     fault: str
+
+
+class BbsConnectRequest(BaseModel):
+    call: str = Field(min_length=1, max_length=12)
+    via: list[str] = Field(default_factory=list, max_length=7)
+
+
+class BbsSendRequest(BaseModel):
+    text: str = Field(default="", max_length=MAX_BBS_LINE)
+
+
+class BbsAddRequest(BaseModel):
+    call: str = Field(min_length=1, max_length=12)
+    freq: int = Field(gt=0)
+    name: str = Field(default="", max_length=80)
+    via: list[str] = Field(default_factory=list, max_length=8)
 
 
 class AprsSendRequest(BaseModel):
@@ -543,6 +561,66 @@ def create_app(broker: Broker, *, manage_lifecycle: bool = True,
         except AprsError as exc:
             raise HTTPException(404, str(exc)) from None
 
+    # ---------------------------------------------------------------- packet BBS terminal
+
+    def bbs() -> BbsService:
+        if broker.bbs is None:
+            raise HTTPException(404, "the BBS terminal is not configured (add a bbs: section)")
+        return broker.bbs
+
+    @view.get("/bbs")
+    async def bbs_snapshot() -> dict[str, Any]:
+        return bbs().snapshot()
+
+    @control.post("/bbs/connect")
+    async def bbs_connect(req: BbsConnectRequest,
+                          who: Principal = Depends(require_control),  # noqa: B008
+    ) -> JSONResponse:
+        svc = bbs()
+        try:
+            normalize_call(req.call)
+            for d in req.via:
+                normalize_call(d)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from None
+        try:
+            s = await svc.connect(req.call, req.via, holder=who.name)
+        except BbsError as exc:
+            return JSONResponse({"ok": False, "reason": str(exc)}, status_code=409)
+        return JSONResponse({"ok": True, "session": asdict(s)})
+
+    @control.post("/bbs/send")
+    async def bbs_send(req: BbsSendRequest) -> JSONResponse:
+        try:
+            await bbs().send(req.text)
+        except BbsError as exc:
+            return JSONResponse({"ok": False, "reason": str(exc)}, status_code=409)
+        return JSONResponse({"ok": True})
+
+    @control.post("/bbs/disconnect")
+    async def bbs_disconnect(who: Principal = Depends(require_control),  # noqa: B008
+    ) -> JSONResponse:
+        if not await bbs().disconnect(by=who.name):
+            return JSONResponse({"ok": False, "reason": "no BBS session"}, status_code=409)
+        return JSONResponse({"ok": True})
+
+    @admin.post("/bbs/stations")
+    async def bbs_add(req: BbsAddRequest) -> dict[str, Any]:
+        try:
+            e = bbs().add_station(BbsEntry(**req.model_dump()))
+        except (ValueError, BbsError) as exc:
+            raise HTTPException(422, str(exc).splitlines()[-1]) from None
+        broker.events.emit("bbs", f"BBS {e.call} added ({e.freq / 1e6:.4f} MHz)")
+        return {"ok": True, "station": e.model_dump()}
+
+    @admin.delete("/bbs/stations/{call}")
+    async def bbs_remove(call: str) -> dict[str, Any]:
+        try:
+            bbs().remove_station(call)
+        except (ValueError, KeyError) as exc:
+            raise HTTPException(404, str(exc).strip("'\"")) from None
+        return {"ok": True}
+
     # ---------------------------------------------------------------- Direwolf
 
     def direwolf() -> DirewolfManager:
@@ -594,6 +672,7 @@ def create_app(broker: Broker, *, manage_lifecycle: bool = True,
         await sock.accept()
         q = broker.events.subscribe()
         aq = broker.aprs.subscribe() if broker.aprs else None
+        bq = broker.bbs.subscribe() if broker.bbs else None
         dirty = asyncio.Event()
         try:
             await sock.send_json({"type": "status", "data": broker.status()})
@@ -629,8 +708,16 @@ def create_app(broker: Broker, *, manage_lifecycle: bool = True,
                     upd = await aq.get()
                     await sock.send_json({"type": "aprs", **upd})
 
+            async def pump_bbs() -> None:
+                if bq is None:
+                    await asyncio.Event().wait()
+                    return
+                while True:
+                    upd = await bq.get()
+                    await sock.send_json({"type": "bbs", **upd})
+
             tasks = [asyncio.create_task(c())
-                     for c in (pump_events, pump_status, drain, pump_aprs)]
+                     for c in (pump_events, pump_status, drain, pump_aprs, pump_bbs)]
             try:
                 await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
             finally:
@@ -643,6 +730,8 @@ def create_app(broker: Broker, *, manage_lifecycle: bool = True,
             broker.events.unsubscribe(q)
             if aq is not None and broker.aprs is not None:
                 broker.aprs.unsubscribe(aq)
+            if bq is not None and broker.bbs is not None:
+                broker.bbs.unsubscribe(bq)
 
     app.include_router(view)
     app.include_router(control)

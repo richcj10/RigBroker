@@ -8,6 +8,7 @@ from typing import Any
 
 from . import __version__
 from .aprs import AprsService
+from .bbs import BbsService, MockAgwServer
 from .config import Config, normalize_call
 from .direwolf import SERVICE_PREFIX, DirewolfManager
 from .events import EventLog
@@ -78,6 +79,19 @@ class Broker:
                         else KissTcpLink(a.kiss_host, a.kiss_port))
             self.aprs = AprsService(a, link, self.events, rx_gate=self.aprs_rx_gate,
                                     tx_gate=self.aprs_tx_gate, position=self.station_position)
+        self.bbs: BbsService | None = None
+        self._mock_agw: MockAgwServer | None = None
+        b = config.bbs
+        if b is not None and b.radio in self.radios and config.bbs_mycall:
+            if mock:  # a pretend Direwolf + BBS, so the terminal works without RF
+                self._mock_agw = MockAgwServer()
+                if b.state_file:  # mock additions never touch the real station's list
+                    b = b.model_copy(update={"state_file": b.state_file + ".mock"})
+            agw = self._mock_agw
+            self.bbs = BbsService(
+                b, config.bbs_mycall, self.radios[b.radio], self.events,
+                tx_allowed=lambda: self.allow_tx,
+                agw_addr=(lambda: ("127.0.0.1", agw.port)) if agw is not None else None)
 
     # ---------------------------------------------------------------- APRS gates
 
@@ -287,8 +301,14 @@ class Broker:
                            for rid, s in self.sims.items()]
         if self.aprs is not None:
             await self.aprs.start()
+        if self._mock_agw is not None:
+            await self._mock_agw.start()
 
     async def stop(self) -> None:
+        if self.bbs is not None:
+            await self.bbs.stop()
+        if self._mock_agw is not None:
+            await self._mock_agw.stop()
         if self.aprs is not None:
             await self.aprs.stop()
         for t in self._sim_tasks:
@@ -308,6 +328,7 @@ class Broker:
             "disabled_radios": sorted(set(self.config.radios) - set(self.radios)),
             "schedule": [],  # scheduler arrives in milestone 5
             "aprs": self.aprs.status() if self.aprs else None,
+            "bbs": self.bbs.status() if self.bbs else None,
             "winlink": {"grid": self.config.winlink.grid,
                         "period": self.planner.day_or_night(),
                         "max_attempts": self.config.winlink.max_attempts},

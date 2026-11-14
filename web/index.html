@@ -20,6 +20,8 @@
     <nav class="views" aria-label="Views">
       <a href="#station" data-view="station">Station</a>
       <a href="#aprs" data-view="aprs" id="nav-aprs" hidden>APRS <span class="badge" id="nav-badge" hidden></span></a>
+      <a href="#vara" data-view="vara">VARA FM</a>
+      <a href="#packet" data-view="packet">Packet</a>
     </nav>
     <div class="top-right">
       <div class="conn"><span id="conn-dot" class="dot"></span><span id="conn-text">connecting…</span></div>
@@ -29,7 +31,7 @@
   </header>
 
   <main>
-    <section id="radios" class="radios view-station" aria-live="polite"></section>
+    <section id="radios" class="radios view-station view-vara view-packet" aria-live="polite"></section>
 
     <section class="panel view-aprs" id="aprs-panel" hidden>
       <div class="log-head">
@@ -119,52 +121,44 @@
       </details>
     </section>
 
-    <section class="panel view-station" id="wx-help">
-      <details>
-        <summary><h2 class="inline-h">Connect Winlink Express</h2> <span class="sub">remote setup: Winlink runs on your PC, the radio stays on the Pi</span></summary>
-        <div class="help">
-          <p class="sub">The Pi tunes the radio and runs the modem; Winlink Express on your PC talks to it over the network.
-            Only your PC can reach these ports (firewall). Nothing can transmit unless RigBroker has started a Winlink session.</p>
-
-          <h3 class="mini">1. Start a session here first</h3>
-          <ol>
-            <li><b>Packet:</b> pick a gateway in <em>Winlink gateways</em> below (★ / Try) or press <em>Start Winlink session</em>: the radio tunes to that gateway and the packet modem starts.</li>
-            <li><b>VARA FM:</b> pick a <em>vara_fm</em> gateway in <em>Winlink gateways</em> below and press <em>Try</em>: the radio tunes to <b>that gateway's frequency</b> and VARA FM starts on the Pi (about 10 s). Winlink Express can't change the frequency - choose the gateway here. (Add VARA FM gateways with <em>+ Add gateway</em>, mode <em>vara_fm</em>.)</li>
-            <li>The radio is held for the session (lease timer on the radio card). Press <em>Release</em> when done; it returns to APRS.</li>
-          </ol>
-
-          <h3 class="mini">2a. Winlink Express - Packet Winlink session</h3>
-          <dl class="kv">
-            <dt>Session type</dt><dd>Packet Winlink</dd>
-            <dt>TNC type</dt><dd>KISS (Direwolf), connected over TCP/IP - not a serial port</dd>
-            <dt>TCP host / address</dt><dd><code data-wx="host">192.168.5.157</code></dd>
-            <dt>TCP port</dt><dd><code data-wx="pkt">8010</code></dd>
-            <dt>Radio control in Winlink Express</dt><dd>none / manual - RigBroker tunes the radio</dd>
-          </dl>
-
-          <h3 class="mini">2b. Winlink Express - VARA FM Winlink session</h3>
-          <dl class="kv">
-            <dt>Session type</dt><dd>VARA FM Winlink</dd>
-            <dt>VARA TCP host / address</dt><dd><code data-wx="host">192.168.5.157</code> (VARA runs on the Pi, not on the PC)</dd>
-            <dt>VARA command port</dt><dd><code>8300</code> (data port 8301)</dd>
-            <dt>"Run VARA automatically"</dt><dd>off - RigBroker starts VARA on the Pi</dd>
-            <dt>Radio control / PTT in Winlink Express</dt><dd>none - VARA on the Pi keys the radio through RigBroker's rig control</dd>
-          </dl>
-
-          <h3 class="mini">3. Connect</h3>
-          <ol>
-            <li>In the Winlink Express session window, choose the same gateway (callsign) you picked here, then <em>Start</em>.</li>
-            <li>Watch the radio card: <span class="ind tx on">TX</span> lights while the Pi transmits; the S-meter shows the gateway.</li>
-          </ol>
-          <p class="sub" data-wx="state"></p>
-        </div>
-      </details>
-    </section>
-
-    <section class="panel view-station" id="gw-panel">
+    <section class="panel view-packet" id="bbs-panel" hidden>
       <div class="log-head">
         <div>
-          <h2>Winlink gateways</h2>
+          <h2>Packet BBS</h2>
+          <div class="sub" id="bbs-sub"></div>
+        </div>
+        <span class="chip" id="bbs-state">idle</span>
+      </div>
+      <form id="bbs-form" class="bbs-form">
+        <label>BBS <select name="call" id="bbs-call"></select></label>
+        <label>Path <select name="path" id="bbs-path"></select></label>
+        <label class="grow" id="bbs-custom-wrap" hidden>Via (digipeaters, in order)
+          <input name="custom" placeholder="W7MOT-6" maxlength="80" autocomplete="off"></label>
+        <button type="submit" id="bbs-connect">Connect</button>
+        <button type="button" class="danger" id="bbs-disconnect" hidden>Disconnect</button>
+        <button type="button" class="ghost small" id="bbs-add-toggle">+ Add BBS</button>
+      </form>
+      <form id="bbs-add" class="gw-form" hidden>
+        <label>Callsign <input name="call" required placeholder="KT7RUN-7" maxlength="11" autocomplete="off"></label>
+        <label>Freq (MHz) <input name="mhz" required type="number" step="0.0001" min="0.1" placeholder="145.710"></label>
+        <label class="grow">Name <input name="name" maxlength="80" placeholder="KT7RUN BBS (Phoenix)"></label>
+        <label class="grow">Digipeaters <input name="via" maxlength="80" placeholder="W7MOT-6 (optional, comma separated)"></label>
+        <button type="submit">Save</button>
+      </form>
+      <pre id="bbs-term" class="term" aria-live="polite" tabindex="0"></pre>
+      <form id="bbs-input" class="bbs-input">
+        <input name="line" id="bbs-line" autocomplete="off" maxlength="250" disabled
+               placeholder="Connect first - then type a command and press Enter (e.g. L, R 12, B)">
+        <button type="submit" id="bbs-send" disabled>Send</button>
+      </form>
+      <p class="sub">Text from RF is shown as plain text. ↑ / ↓ recall earlier commands. The radio is held while connected and
+        returns to APRS when the session ends.</p>
+    </section>
+
+    <section class="panel view-vara view-packet" id="gw-panel">
+      <div class="log-head">
+        <div>
+          <h2 id="gw-title">Winlink gateways</h2>
           <div class="sub" id="gw-info"></div>
         </div>
         <button class="ghost small" id="gw-add-toggle" type="button">+ Add gateway</button>
@@ -186,6 +180,63 @@
           <tbody id="gw-body"></tbody>
         </table>
       </div>
+    </section>
+
+    <section class="panel view-vara" id="wx-help-vara">
+      <details>
+        <summary><h2 class="inline-h">Connect Winlink Express - VARA FM</h2> <span class="sub">Winlink runs on your PC; VARA and the radio stay on the Pi</span></summary>
+        <div class="help">
+          <p class="sub">Only your PC can reach the VARA ports (firewall). Nothing can transmit unless RigBroker has started a session.</p>
+          <h3 class="mini">1. Pick the gateway here</h3>
+          <ol>
+            <li>Press <em>Try VARA FM</em> on a gateway above: the radio tunes to <b>that gateway's frequency</b> and VARA FM starts on the Pi (about 10 s).
+              Winlink Express can't change the frequency, so choose the gateway here. Add gateways with <em>+ Add gateway</em>.</li>
+            <li>The radio is held for the session (lease timer on the radio card). Press <em>Release</em> when done; it returns to APRS.</li>
+          </ol>
+          <h3 class="mini">2. Winlink Express - VARA FM Winlink session (one-time setup)</h3>
+          <dl class="kv">
+            <dt>Session type</dt><dd>VARA FM Winlink</dd>
+            <dt>VARA TCP host / address</dt><dd><code data-wx="host">192.168.5.157</code> (VARA runs on the Pi, not on the PC)</dd>
+            <dt>VARA command port</dt><dd><code>8300</code> (data port 8301)</dd>
+            <dt>"Run VARA automatically"</dt><dd>off - RigBroker starts VARA on the Pi</dd>
+            <dt>Radio control / PTT in Winlink Express</dt><dd>none - VARA on the Pi keys the radio through RigBroker's rig control</dd>
+          </dl>
+          <h3 class="mini">3. Connect</h3>
+          <ol>
+            <li>In the Winlink Express VARA FM window, choose the same gateway (callsign), then <em>Start</em>.</li>
+            <li>Watch the radio card: <span class="ind tx on">TX</span> lights while the Pi transmits; the S-meter shows the gateway.</li>
+          </ol>
+          <p class="sub" data-wx="state"></p>
+        </div>
+      </details>
+    </section>
+
+    <section class="panel view-packet" id="wx-help-pkt">
+      <details>
+        <summary><h2 class="inline-h">Connect Winlink Express - Packet</h2> <span class="sub">Winlink runs on your PC; Direwolf and the radio stay on the Pi</span></summary>
+        <div class="help">
+          <p class="sub">Only your PC can reach the packet port (firewall). Nothing can transmit unless RigBroker has started a session.</p>
+          <h3 class="mini">1. Pick the gateway here</h3>
+          <ol>
+            <li>Press <em>Try packet</em> on a gateway above (or <em>Start Winlink session</em> on the radio card for your best one): the radio tunes to it and the packet modem starts.</li>
+            <li>The radio is held for the session (lease timer on the radio card). Press <em>Release</em> when done; it returns to APRS.</li>
+          </ol>
+          <h3 class="mini">2. Winlink Express - Packet Winlink session (one-time setup)</h3>
+          <dl class="kv">
+            <dt>Session type</dt><dd>Packet Winlink</dd>
+            <dt>TNC type</dt><dd>KISS (Direwolf), connected over TCP/IP - not a serial port</dd>
+            <dt>TCP host / address</dt><dd><code data-wx="host">192.168.5.157</code></dd>
+            <dt>TCP port</dt><dd><code data-wx="pkt">8010</code></dd>
+            <dt>Radio control in Winlink Express</dt><dd>none / manual - RigBroker tunes the radio</dd>
+          </dl>
+          <h3 class="mini">3. Connect</h3>
+          <ol>
+            <li>In the Winlink Express packet window, choose the same gateway (callsign), then <em>Start</em>.</li>
+            <li>Watch the radio card: <span class="ind tx on">TX</span> lights while the Pi transmits; the S-meter shows the gateway.</li>
+          </ol>
+          <p class="sub" data-wx="state"></p>
+        </div>
+      </details>
     </section>
 
     <section class="panel view-station" id="schedule-panel">
@@ -297,5 +348,6 @@
           integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
   <script src="/static/app.js"></script>
   <script src="/static/aprs.js"></script>
+  <script src="/static/bbs.js"></script>
 </body>
 </html>

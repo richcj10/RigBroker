@@ -512,6 +512,81 @@ class AprsConfig(_Strict):
         return int(self.kiss.rpartition(":")[2])
 
 
+class BbsEntry(_Strict):
+    """A packet BBS / node the web terminal can connect to."""
+
+    call: str
+    freq: int = Field(gt=0, description="Hz")
+    name: str = Field(default="", max_length=80)
+    via: list[str] = Field(default_factory=list, max_length=8,
+                           description="digipeaters offered as 'via ...' (Direct is "
+                                       "always offered)")
+
+    @field_validator("call")
+    @classmethod
+    def _call(cls, v: str) -> str:
+        return normalize_call(v)
+
+    @field_validator("via")
+    @classmethod
+    def _via(cls, v: list[str]) -> list[str]:
+        return [normalize_call(c) for c in v]
+
+    @field_validator("name")
+    @classmethod
+    def _name(cls, v: str) -> str:
+        if not _TEXT_RE.match(v):
+            raise ValueError('name: printable ASCII without " \\ | ~ {')
+        return v
+
+
+class BbsConfig(_Strict):
+    """Packet BBS terminal in the web UI (AX.25 connected mode via Direwolf's AGW port)."""
+
+    radio: str = "vu"
+    profile: str = Field(default="packet_bbs",
+                         description="profile leased for a session; tuned to the BBS frequency")
+    mycall: str | None = Field(default=None,
+                               description="your call on the BBS; default: APRS call without SSID")
+    agw: str = "127.0.0.1:8000"
+    state_file: str | None = Field(default="~/.local/state/rigbroker/bbs.json",
+                                   description="BBSes added in the web UI; null = memory only")
+    connect_timeout_s: float = Field(default=60.0, gt=0,
+                                     description="give up if the BBS doesn't answer")
+    scrollback_lines: int = Field(default=2000, ge=100, le=20000)
+    stations: list[BbsEntry] = Field(default_factory=list)
+
+    @field_validator("mycall")
+    @classmethod
+    def _mycall(cls, v: str | None) -> str | None:
+        return normalize_call(v) if v else None
+
+    @field_validator("agw")
+    @classmethod
+    def _agw(cls, v: str) -> str:
+        host, sep, port = v.rpartition(":")
+        if not sep or not host or not port.isdigit():
+            raise ValueError("agw must be host:port")
+        return v
+
+    @field_validator("stations")
+    @classmethod
+    def _unique(cls, v: list[BbsEntry]) -> list[BbsEntry]:
+        calls = [b.call for b in v]
+        dup = {c for c in calls if calls.count(c) > 1}
+        if dup:
+            raise ValueError(f"BBS listed twice: {', '.join(sorted(dup))}")
+        return v
+
+    @property
+    def agw_host(self) -> str:
+        return self.agw.rpartition(":")[0]
+
+    @property
+    def agw_port(self) -> int:
+        return int(self.agw.rpartition(":")[2])
+
+
 class SecurityConfig(_Strict):
     """Web/API access control (one shared station password + API tokens)."""
 
@@ -535,9 +610,40 @@ class Config(_Strict):
     winlink: WinlinkConfig = Field(default_factory=WinlinkConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
     aprs: AprsConfig | None = None
+    bbs: BbsConfig | None = None
     direwolf: DirewolfConfig = Field(default_factory=DirewolfConfig)
     power_file: str | None = Field(
         default=None, description="where TX power levels chosen in the web UI are saved")
+
+    @model_validator(mode="after")
+    def _bbs(self) -> Config:
+        b = self.bbs
+        if b is None:
+            return self
+        r = self.radios.get(b.radio)
+        if r is None or not r.enabled:
+            raise ValueError(f"bbs.radio {b.radio!r} is not an enabled radio")
+        p = r.profiles.get(b.profile)
+        if p is None:
+            raise ValueError(f"bbs.profile {b.profile!r} is not a profile of radio {b.radio!r}")
+        if p.service != "direwolf@pkt" or not p.transmits or not p.freq_ranges or p.run:
+            raise ValueError(f"bbs.profile {b.profile!r} must use service direwolf@pkt, "
+                             "transmit, have freq_ranges and no run command")
+        for e in b.stations:
+            if not p.freq_allowed(e.freq):
+                raise ValueError(f"BBS {e.call}: {e.freq} Hz is outside {b.profile}'s freq_ranges")
+        if b.mycall is None and self.aprs is None:
+            raise ValueError("bbs.mycall is required when there is no aprs section")
+        return self
+
+    @property
+    def bbs_mycall(self) -> str | None:
+        """Your call on a BBS: bbs.mycall, else the APRS call without its SSID."""
+        if self.bbs is None:
+            return None
+        if self.bbs.mycall:
+            return self.bbs.mycall
+        return self.aprs.callsign.split("-")[0] if self.aprs else None
 
     @model_validator(mode="after")
     def _aprs_radio(self) -> Config:

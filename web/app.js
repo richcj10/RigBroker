@@ -291,6 +291,9 @@ function render() {
 // ---------------------------------------------------------------- winlink gateways
 let gwRadio = null;      // radio whose winlink_profile decides usability
 let gwLoading = false;
+let gwData = null;       // last /winlink/gateways answer (re-filtered when the tab changes)
+const GW_TAB = { vara: { mode: "vara_fm", title: "VARA FM gateways", tryLabel: "Try VARA FM" },
+                 packet: { mode: "packet", title: "Packet gateways", tryLabel: "Try packet" } };
 const GW_EVENTS = new Set(["winlink_attempt", "winlink_gateway", "plan_next", "lease_started", "lease_ended"]);
 
 function ago(ts) {
@@ -319,6 +322,10 @@ function trying() {
 }
 
 function renderGateways(data) {
+  gwData = data;
+  const tab = GW_TAB[document.body.dataset.view] || null;
+  $("#gw-title").textContent = tab ? tab.title : "Winlink gateways";
+  if (tab) $("#gw-form").mode.value = tab.mode;  // + Add gateway defaults to this tab's mode
   const per = data.period ? ` · it's ${data.period} at your location` : "";
   $("#gw-info").textContent = data.grid
     ? `Your grid ${data.grid}${per}. Favorites first, then success rate, then distance.`
@@ -326,12 +333,13 @@ function renderGateways(data) {
   const body = $("#gw-body");
   const frag = document.createDocumentFragment();
   const now = trying();
-  if (!data.gateways.length) {
+  const shown = tab ? data.gateways.filter((g) => g.mode === tab.mode) : data.gateways;
+  if (!shown.length) {
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td colspan="9" class="sub">No gateways yet — add the ones you know work.</td>`;
+    tr.innerHTML = `<td colspan="9" class="sub">No ${tab ? tab.title.toLowerCase() : "gateways"} yet — add the ones you know work.</td>`;
     frag.append(tr);
   }
-  for (const g of data.gateways) {
+  for (const g of shown) {
     const tr = document.createElement("tr");
     tr.className = [g.usable ? "" : "unusable", g.blocked ? "blocked" : "", g.call === now ? "trying" : ""].join(" ");
     const st = g.stats;
@@ -347,7 +355,7 @@ function renderGateways(data) {
       <td class="sub">${ago(st.last_ok)}</td>
       <td class="num">${g.score}</td>
       <td><div class="acts">
-        <button type="button" class="ghost small" data-gw="try" ${g.usable && !g.blocked ? "" : "disabled"}>Try</button>
+        <button type="button" class="ghost small" data-gw="try" ${g.usable && !g.blocked ? "" : "disabled"}>${tab ? tab.tryLabel : "Try"}</button>
         <button type="button" class="ghost small" data-gw="block">${g.blocked ? "Unblock" : "Block"}</button>
         ${g.source === "user" ? '<button type="button" class="ghost small" data-gw="remove">Remove</button>' : ""}
       </div></td>`;
@@ -463,7 +471,11 @@ function setConn(on, text) {
 }
 function connect() {
   const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`);
-  ws.onopen = () => { backoff = 500; setConn(true, "live"); if (window.aprsInit) window.aprsInit(); };
+  ws.onopen = () => {
+    backoff = 500; setConn(true, "live");
+    if (window.aprsInit) window.aprsInit();
+    if (window.bbsInit) window.bbsInit();  // reload scrollback/state after a reconnect
+  };
   ws.onmessage = (m) => {
     const msg = JSON.parse(m.data);
     if (msg.type === "status") {
@@ -475,6 +487,7 @@ function connect() {
       }
     }
     else if (msg.type === "aprs") { if (window.onAprs) window.onAprs(msg); }
+    else if (msg.type === "bbs") { if (window.onBbs) window.onBbs(msg); }
     else if (msg.type === "events") { logRows = []; addEvents(msg.data); }
     else if (msg.type === "event") {
       addEvents([msg.data]);
@@ -502,24 +515,33 @@ async function fillWinlinkHelp() {
   } catch { /* keep defaults */ }
 }
 function winlinkHelpState(st) {
-  const el = document.querySelector('[data-wx="state"]');
-  if (!el || !st) return;
+  const els = document.querySelectorAll('[data-wx="state"]');
+  if (!els.length || !st) return;
   const r = Object.values(st.radios).find((x) => x.winlink_profile);
   if (!r) return;
   const why = r.profiles[r.winlink_profile].unavailable || (r.profiles.vara_fm && r.profiles.vara_fm.unavailable);
-  el.textContent = why ? `Right now: Winlink sessions are unavailable (${why}).`
+  const text = why ? `Right now: Winlink sessions are unavailable (${why}).`
     : r.lease ? `Right now: ${r.lease.profile} session active for ${r.lease.holder}.` : "Right now: ready - start a session above.";
+  els.forEach((el) => (el.textContent = text));
 }
 fillWinlinkHelp();
 
-// ---------------------------------------------------------------- views (#station / #aprs)
-const VIEWS = ["station", "aprs"];
+// ---------------------------------------------------------------- views (tabs)
+// An element shows on every view it has a view-<name> class for (e.g. the radio card is on
+// Station, VARA FM and Packet); everything else with a view-* class is hidden.
+const VIEWS = ["station", "aprs", "vara", "packet"];
+const VIEW_TITLES = { aprs: "APRS", vara: "VARA FM", packet: "Packet" };
 function showView() {
   let v = location.hash.replace("#", "");
   if (!VIEWS.includes(v) || (v === "aprs" && $("#nav-aprs").hidden && window.aprsKnown === false)) v = "station";
   document.body.dataset.view = v;
+  document.querySelectorAll("[class*='view-']").forEach((el) => {
+    const mine = [...el.classList].filter((c) => c.startsWith("view-"));
+    if (mine.length) el.classList.toggle("offview", !mine.includes(`view-${v}`));
+  });
   document.querySelectorAll(".views a").forEach((a) => a.classList.toggle("on", a.dataset.view === v));
-  document.title = v === "aprs" ? "APRS · RigBroker" : "RigBroker";
+  document.title = VIEW_TITLES[v] ? `${VIEW_TITLES[v]} · RigBroker` : "RigBroker";
+  if (gwData) renderGateways(gwData);  // the gateway list follows the tab (VARA FM / packet)
   if (window.onViewChange) window.onViewChange(v);
 }
 window.addEventListener("hashchange", showView);
