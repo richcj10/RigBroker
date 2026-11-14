@@ -400,3 +400,8 @@ tr.has-wx td:last-child { color: #2f7bd9; }
 .banner .meter-val { font: 13px var(--mono); min-width: 52px; }
 .banner .pwr { margin: 0; }
 .banner .b-fault { flex-basis: 100%; color: var(--bad); font-weight: 600; font-size: 14px; }
+
+/* GPS -> Direwolf position prompt */
+.panel.notice { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px;
+  border-color: var(--info); box-shadow: inset 4px 0 0 var(--info), var(--shadow); }
+.panel.notice .acts { display: flex; gap: 8px; }

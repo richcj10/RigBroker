@@ -163,6 +163,19 @@ function profileText(r) {
   return t;
 }
 
+// ---------------------------------------------------------------- GPS -> Direwolf prompt
+// The broker rounds GPS to 0.1' (~185 m) and only reports grid squares and distances.
+function renderGpsPrompt(g) {
+  const p = g && g.pending;
+  $("#gps-prompt").hidden = !p;
+  if (!p) return;
+  $("#gps-prompt-text").textContent =
+    ` The radio's GPS is ${p.distance_km != null ? p.distance_km + " km" : "away"} from the APRS position Direwolf uses`
+    + ` (now grid ${p.grid}${g.direwolf_grid ? `, Direwolf has ${g.direwolf_grid}` : ""}). Rounded to ~185 m before use.`;
+}
+$("#gps-accept").addEventListener("click", () => api("POST", "/gps/direwolf/accept", {}));
+$("#gps-dismiss").addEventListener("click", () => api("POST", "/gps/direwolf/dismiss", {}));
+
 // ---------------------------------------------------------------- compact radio banner
 // The APRS / VARA FM / Packet tabs show only what's needed while operating (chosen by the
 // user): frequency, TX, S-meter, TX power (adjustable) and Release. Full card: Station tab.
@@ -320,6 +333,7 @@ function render() {
   $("#txmode").textContent = status.allow_tx ? "allow-tx" : "TX disabled";
   $("#txmode").className = "pill " + (status.allow_tx ? "ok" : "warn");
   for (const [id, r] of Object.entries(status.radios)) { updateCard(id, r, status.mock); updateBanner(id, r); }
+  renderGpsPrompt(status.gps);
   if (window.onStatus) window.onStatus(status);
   winlinkHelpState(status);
   const sched = $("#schedule");

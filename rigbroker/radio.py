@@ -43,6 +43,7 @@ T = TypeVar("T")
 MIN_ATTEMPT_S = 30.0  # don't start another plan step with less lease time than this
 # (radio_id, step, ok, duration_s, detail) -> None; e.g. the Winlink planner's history
 AttemptListener = Callable[[str, PlanStep, bool, float, str], None]
+PositionListener = Callable[[str, Position], None]  # (radio id, fresh GPS fix)
 
 
 class SwitchAbort(Exception):
@@ -106,6 +107,7 @@ class RadioController:
         *,
         allow_tx: bool = False,
         attempt_listener: AttemptListener | None = None,
+        position_listener: PositionListener | None = None,
         probe: InterfaceProbe | None = None,
         power_store: PowerStore | None = None,
     ) -> None:
@@ -113,6 +115,7 @@ class RadioController:
         self.probe = probe
         self.power_store = power_store or PowerStore(None)
         self.attempt_listener = attempt_listener
+        self.position_listener = position_listener
         self.cfg = cfg
         self.safety = safety
         self.rig = rig
@@ -242,6 +245,11 @@ class RadioController:
             self._emit_once("gps", f"station position from the radio's GPS: grid "
                             f"{to_grid(pos.lat, pos.lon)}")
         self.position = pos
+        if self.position_listener is not None:
+            try:
+                self.position_listener(self.id, pos)
+            except Exception as exc:  # a listener bug must not stop GPS reads
+                self._emit("internal_error", f"position listener failed: {exc!r}", "error")
         return pos
 
     CONSUMER_CHECK_S = 15.0

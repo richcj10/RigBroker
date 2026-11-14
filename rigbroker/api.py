@@ -656,6 +656,23 @@ def create_app(broker: Broker, *, manage_lifecycle: bool = True,
                            + (" (+passcode)" if "passcode" in changes else ""))
         return {"ok": True, "settings": dw.public_settings()}
 
+    # GPS -> Direwolf position (precision already removed; the UI only sees grid/distance)
+    @admin.post("/gps/direwolf/accept")
+    async def gps_accept() -> JSONResponse:
+        ps = broker.position_sync
+        if ps is None or not await ps.accept():
+            return JSONResponse({"ok": False, "reason": "no GPS position update pending"},
+                                status_code=409)
+        return JSONResponse({"ok": True, "gps": ps.status()})
+
+    @admin.post("/gps/direwolf/dismiss")
+    async def gps_dismiss() -> JSONResponse:
+        ps = broker.position_sync
+        if ps is None or not ps.dismiss():
+            return JSONResponse({"ok": False, "reason": "no GPS position update pending"},
+                                status_code=409)
+        return JSONResponse({"ok": True})
+
     @admin.post("/direwolf/apply")
     async def direwolf_apply() -> dict[str, Any]:
         direwolf()

@@ -31,6 +31,17 @@
   </header>
 
   <main>
+    <section class="panel notice view-station view-aprs" id="gps-prompt" hidden>
+      <div>
+        <b>GPS position changed</b>
+        <span class="sub" id="gps-prompt-text"></span>
+      </div>
+      <div class="acts">
+        <button type="button" id="gps-accept">Update Direwolf</button>
+        <button type="button" class="ghost" id="gps-dismiss">Dismiss</button>
+      </div>
+    </section>
+
     <section id="radios" class="radios view-station" aria-live="polite"></section>
     <!-- compact "radio in operation" banner for the APRS / VARA FM / Packet tabs -->
     <section id="banners" class="banners view-aprs view-vara view-packet" aria-live="polite"></section>

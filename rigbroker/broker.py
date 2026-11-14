@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import os
+from pathlib import Path
 from typing import Any
 
 from . import __version__
@@ -12,6 +14,7 @@ from .bbs import BbsService, MockAgwServer
 from .config import Config, normalize_call
 from .direwolf import SERVICE_PREFIX, DirewolfManager
 from .events import EventLog
+from .gps import Position
 from .hwcheck import InterfaceProbe
 from .jobs import JobRunner, MockJobRunner, SubprocessJobRunner
 from .kiss import AprsLink, KissTcpLink
@@ -19,6 +22,7 @@ from .leases import PlanStep, Priority, Verdict
 from .mock_aprs import MockAprsLink
 from .mock_rig import MockRig
 from .mock_sim import MockActivity
+from .position import PositionSync
 from .power import PowerStore
 from .radio import LeaseResult, RadioController
 from .rig_client import RigClient, RigctldClient
@@ -63,16 +67,24 @@ class Broker:
             rid: RadioController(rid, rcfg, config.safety, rigs[rid], services, jobs,
                                  self.events, allow_tx=allow_tx,
                                  attempt_listener=self._on_attempt,
+                                 position_listener=self._on_position,
                                  probe=(InterfaceProbe(rcfg.interface)
                                         if rcfg.interface and not mock else None),
                                  power_store=power_store)
             for rid, rcfg in config.enabled_radios().items()
         }
         self.direwolf: DirewolfManager | None = None
+        self.position_sync: PositionSync | None = None
+        self._bg: set[asyncio.Task[None]] = set()
         self.aprs: AprsService | None = None
         a = config.aprs
         if a is not None:
             self.direwolf = DirewolfManager(config.direwolf, a.callsign)
+            sf = config.direwolf.settings_file
+            gps_file = (str(Path(os.path.expanduser(sf)).with_name("gps-last.json"))
+                        + (".mock" if mock else "")) if sf else None
+            self.position_sync = PositionSync(self.direwolf, gps_file, self.events,
+                                              self._apply_position)
             link = aprs_link
             if link is None:
                 link = (MockAprsLink(self.station_position, a.callsign) if mock
@@ -151,6 +163,27 @@ class Broker:
         if not restarted and not notes:
             notes.append("Direwolf not running; new settings apply on its next start")
         return {"written": paths, "restarted": restarted, "notes": notes}
+
+    def _on_position(self, radio_id: str, pos: Position) -> None:
+        """A GPS fix from a radio: the APRS radio's fixes keep Direwolf's position current."""
+        aprs = self.config.aprs
+        if self.position_sync is None or aprs is None or radio_id != aprs.radio:
+            return
+        task = asyncio.get_running_loop().create_task(self.position_sync.on_fix(pos))
+        self._bg.add(task)
+        task.add_done_callback(self._bg.discard)
+
+    async def _apply_position(self, restart: bool) -> None:
+        """Write the Direwolf configs after a position change. The position is only used by
+        the APRS beacon, so only a running direwolf@aprs is restarted - never the packet
+        modem (that would cut a BBS or Winlink session)."""
+        assert self.direwolf is not None
+        self.direwolf.write()
+        if not restart or self.config.aprs is None:
+            return
+        r = self.radios.get(self.config.aprs.radio)
+        if r is not None and r.consumer == self.config.aprs.tx_service:
+            await r.restart_consumer("APRS beacon position changed")
 
     def _on_attempt(self, radio_id: str, step: PlanStep, ok: bool, duration_s: float,
                     detail: str) -> None:
@@ -289,6 +322,8 @@ class Broker:
                 else "HARDWARE")
         self.events.emit("broker", f"RigBroker {__version__} starting ({mode}, "
                          f"allow_tx={self.allow_tx}, radios: {', '.join(self.radios)})")
+        if self.position_sync is not None:
+            await self.position_sync.startup()  # no position yet: last known GPS fix
         if self.direwolf is not None:
             # Direwolf must find a current config whenever the broker starts it.
             self.direwolf.write()
@@ -329,6 +364,7 @@ class Broker:
             "schedule": [],  # scheduler arrives in milestone 5
             "aprs": self.aprs.status() if self.aprs else None,
             "bbs": self.bbs.status() if self.bbs else None,
+            "gps": self.position_sync.status() if self.position_sync else None,
             "winlink": {"grid": self.config.winlink.grid,
                         "period": self.planner.day_or_night(),
                         "max_attempts": self.config.winlink.max_attempts},
