@@ -93,6 +93,9 @@ class WinlinkCheckRequest(BaseModel):
     holder: str = Field(default="web", min_length=1, max_length=64)
     priority: str = "manual"
     gateway: str | None = Field(default=None, description="try only this gateway")
+    profile: str | None = Field(
+        default=None, description="Winlink profile to use (default: the one matching the "
+                                  "gateway's mode, else the radio's winlink_profile)")
 
 
 class FlagRequest(BaseModel):
@@ -404,7 +407,7 @@ def create_app(broker: Broker, *, manage_lifecycle: bool = True,
         holder = who.name
         try:
             res = await broker.winlink_check(rid, holder=holder, priority=h.priority,
-                                             gateway=h.gateway)
+                                             gateway=h.gateway, profile=h.profile)
         except LookupError as exc:
             raise HTTPException(404, str(exc)) from None
         return _lease_response(res)
@@ -413,15 +416,15 @@ def create_app(broker: Broker, *, manage_lifecycle: bool = True,
 
     @view.get("/winlink/gateways")
     async def gateways(radio_id: str | None = Query(None, alias="radio")) -> dict[str, Any]:
-        """All known gateways ranked for a radio's winlink_profile (best first)."""
-        prof = None
+        """All known gateways ranked (best first); with ``radio``, usable means one of that
+        radio's Winlink profiles (packet, VARA FM, ...) can reach it."""
+        profs = None
         if radio_id is not None:
             r = radio(radio_id)
-            if r.cfg.winlink_profile:
-                prof = r.cfg.profiles[r.cfg.winlink_profile]
+            profs = [p for p in r.cfg.profiles.values() if p.winlink_mode]
         p = broker.planner
         return {"grid": p.cfg.grid, "period": p.day_or_night(),
-                "gateways": [x.to_dict() for x in p.rank(prof)]}
+                "gateways": [x.to_dict() for x in p.rank(profiles=profs)]}
 
     @admin.post("/winlink/gateways")
     async def add_gateway(req: GatewayRequest) -> dict[str, Any]:

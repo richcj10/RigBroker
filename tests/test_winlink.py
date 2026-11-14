@@ -68,7 +68,10 @@ def test_favorite_first_then_distance() -> None:
     assert calls(p) == ["W4FAV-10", "K4NEAR-10", "K4FAR-10"]
     ranked = p.rank(gw_profile())
     hf = next(r for r in ranked if r.gateway.call == "W4HF")
-    assert not hf.usable and ranked[-1] is hf
+    # gateways of other modes (VARA HF / VARA FM) can't be used by this packet profile:
+    # all of them sort after every usable one
+    usable = [r.usable for r in ranked]
+    assert not hf.usable and usable == sorted(usable, reverse=True)
     assert any("favorite" in x for x in ranked[0].reasons)
 
 

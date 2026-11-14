@@ -8,7 +8,7 @@ from typing import Any
 
 from . import __version__
 from .aprs import AprsService
-from .config import Config
+from .config import Config, normalize_call
 from .direwolf import SERVICE_PREFIX, DirewolfManager
 from .events import EventLog
 from .hwcheck import InterfaceProbe
@@ -145,18 +145,52 @@ class Broker:
                          radio=radio_id, level="info" if ok else "warning", gateway=step.key,
                          ok=ok, duration_s=round(duration_s, 1))
 
-    async def winlink_check(self, radio_id: str, *, holder: str = "web",
-                            priority: str = "manual", gateway: str | None = None) -> LeaseResult:
-        """Lease the radio's winlink_profile with a ranked gateway plan.
+    def _winlink_profile_for(self, r: RadioController, gateway: str | None,
+                             profile: str | None) -> str | LeaseResult:
+        """Which profile a Winlink check uses: the one asked for, else the one whose
+        winlink_mode matches the chosen gateway's mode (so a VARA FM gateway starts the
+        VARA FM profile tuned to it), else the radio's winlink_profile."""
+        profs = r.cfg.profiles
+        if profile is not None:
+            if profile not in profs or not (profs[profile].winlink_mode
+                                            or profile == r.cfg.winlink_profile):
+                return LeaseResult(Verdict.REJECT, f"{profile!r} is not a Winlink profile",
+                                   invalid=True)
+            return profile
+        if gateway is not None:
+            try:
+                call = normalize_call(gateway)
+            except ValueError as exc:
+                return LeaseResult(Verdict.REJECT, str(exc), invalid=True)
+            gw = next((g for g in self.planner.gateways() if g.call == call), None)
+            if gw is None:
+                return LeaseResult(Verdict.REJECT, f"unknown gateway {call}", invalid=True)
+            names = [n for n, p in profs.items() if p.winlink_mode == gw.mode]
+            if not names:
+                return LeaseResult(Verdict.REJECT, f"{call} is a {gw.mode} gateway but this "
+                                   f"radio has no {gw.mode} profile", invalid=True)
+            # the radio's main winlink_profile wins if it has the right mode
+            return r.cfg.winlink_profile if r.cfg.winlink_profile in names else names[0]
+        if not r.cfg.winlink_profile:
+            raise LookupError(f"radio {r.id!r} has no winlink_profile configured")
+        return r.cfg.winlink_profile
 
-        Raises LookupError for an unknown radio or one without a winlink_profile.
+    async def winlink_check(self, radio_id: str, *, holder: str = "web",
+                            priority: str = "manual", gateway: str | None = None,
+                            profile: str | None = None) -> LeaseResult:
+        """Lease a Winlink profile with a ranked gateway plan.
+
+        The profile is ``profile``, else the one matching ``gateway``'s mode, else the
+        radio's winlink_profile. Raises LookupError for an unknown radio, or for one
+        without a winlink_profile when neither is given.
         """
         r = self.radios.get(radio_id)
         if r is None:
             raise LookupError(f"unknown radio {radio_id!r}")
-        pname = r.cfg.winlink_profile
-        if not pname:
-            raise LookupError(f"radio {radio_id!r} has no winlink_profile configured")
+        chosen = self._winlink_profile_for(r, gateway, profile)
+        if isinstance(chosen, LeaseResult):
+            return chosen
+        pname = chosen
         prof = r.cfg.profiles[pname]
         if not self.allow_tx:
             return LeaseResult(Verdict.REJECT, "Winlink needs to transmit; the broker is "

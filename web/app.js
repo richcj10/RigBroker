@@ -119,7 +119,7 @@ function buildCard(id, r) {
     b.addEventListener("click", () => {
       if (isDefault) return api("POST", `/radios/${id}/release`, { holder: "web" });
       if (p.winlink_mode) {
-        return api("POST", `/radios/${id}/winlink/check`, { holder: "web", priority: f.priority.value });
+        return api("POST", `/radios/${id}/winlink/check`, { holder: "web", priority: f.priority.value, profile: name });
       }
       const minutes = parseFloat(f.minutes.value);
       api("POST", `/radios/${id}/lease`, {

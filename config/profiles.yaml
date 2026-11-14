@@ -39,7 +39,11 @@ radios:
       winlink_pkt: {freq: 145050000, mode: FM, power: 0.5, squelch: 0.30, volume: 0.12, service: direwolf@pkt,
                     winlink_mode: packet, freq_ranges: [[144000000, 148000000], [420000000, 450000000]],
                     max_minutes: 30, transmits: true}
-      vara_fm:     {freq: 145090000, mode: FM, power: 0.5, squelch: 0.15, volume: 0.12, service: vara-fm, max_minutes: 30, transmits: true}
+      # VARA FM: pick a vara_fm gateway in the web UI (Try) - the radio tunes to its frequency
+      # (Winlink Express can't retune the radio; it only talks to VARA on the Pi).
+      vara_fm:     {freq: 145090000, mode: FM, power: 0.5, squelch: 0.15, volume: 0.12, service: vara-fm,
+                    winlink_mode: vara_fm, freq_ranges: [[144000000, 148000000], [420000000, 450000000]],
+                    max_minutes: 30, transmits: true}
       monitor:     {freq: 147240000, mode: FM, squelch: 0.15, volume: 0.12, service: audio-stream, max_minutes: 60, transmits: false}
       # No "off" profile: Hamlib's ID-4100 driver can't power the radio off over CI-V
       # (set_powerstat -> RPRT -11). For a radio that can, add:

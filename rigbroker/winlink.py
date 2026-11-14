@@ -266,8 +266,14 @@ class WinlinkPlanner:
         lat, lon = grid_to_latlon(self.cfg.grid)
         return "day" if sun_elevation(lat, lon, self.now()) > -6 else "night"
 
-    def rank(self, profile: Profile | None = None) -> list[Ranked]:
-        """Every known gateway, best first (unusable/blocked ones last)."""
+    def rank(self, profile: Profile | None = None,
+             profiles: list[Profile] | None = None) -> list[Ranked]:
+        """Every known gateway, best first (unusable/blocked ones last).
+
+        ``profile`` judges usability against one Winlink profile; ``profiles`` against any
+        of a radio's Winlink profiles (a gateway is usable if a profile of its mode allows
+        its frequency) - that is what the gateway panel shows.
+        """
         period = self.day_or_night()
         out = []
         for gw in self.gateways():
@@ -304,6 +310,14 @@ class WinlinkPlanner:
                 elif not profile.freq_allowed(gw.freq):
                     usable = False
                     reasons.append("frequency outside profile freq_ranges")
+            elif profiles is not None:
+                same = [p for p in profiles if p.winlink_mode == gw.mode]
+                if not same:
+                    usable = False
+                    reasons.append(f"no {gw.mode} profile on this radio")
+                elif not any(p.freq_allowed(gw.freq) for p in same):
+                    usable = False
+                    reasons.append(f"frequency outside the {gw.mode} profile's freq_ranges")
             if blocked:
                 reasons.append("blocked")
             out.append(Ranked(gw, score, reasons, fav, blocked, usable, dist, st))

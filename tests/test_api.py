@@ -125,9 +125,43 @@ def test_winlink_check_single_gateway(client: tuple[TestClient, Broker]) -> None
 
 def test_winlink_check_no_usable_gateway(client: tuple[TestClient, Broker]) -> None:
     c, _ = client
-    r = c.post("/radios/vu/winlink/check", json={"gateway": "W4HF"})
+    r = c.post("/radios/vu/winlink/check", json={"gateway": "W4HF"})  # vara_hf: no such profile
+    assert r.status_code == 422 and "no vara_hf profile" in r.json()["reason"]
+    # forcing the packet profile onto it still goes through the planner's usability check
+    r = c.post("/radios/vu/winlink/check", json={"gateway": "W4HF", "profile": "winlink_gw"})
     assert r.status_code == 409 and "not usable" in r.json()["reason"]
     assert c.post("/radios/vu/winlink/check", json={"gateway": "bad;id"}).status_code == 422
+    assert c.post("/radios/vu/winlink/check", json={"gateway": "NOPE-1"}).status_code == 422
+    r = c.post("/radios/vu/winlink/check", json={"profile": "monitor"})
+    assert r.status_code == 422 and "not a Winlink profile" in r.json()["reason"]
+
+
+def test_vara_fm_gateway_tunes_the_vara_profile(client: tuple[TestClient, Broker]) -> None:
+    """Picking a VARA FM gateway starts the VARA FM profile on that gateway's frequency
+    (Winlink Express can't retune the radio, so the web UI does)."""
+    c, _ = client
+    r = c.post("/radios/vu/winlink/check", json={"gateway": "n7uhf-2"})
+    assert r.status_code == 200, r.json()
+    lease = r.json()["lease"]
+    assert lease["profile"] == "vara_gw"
+    assert [(s["key"], s["freq"]) for s in lease["plan"]] == [("N7UHF-2", 441_300_000)]
+    st = poll(c, state_is("active"))
+    assert st["applied_freq"] == 441_300_000 and st["consumer"] == "vara-fm"
+
+
+def test_vara_profile_button_picks_best_vara_gateway(client: tuple[TestClient, Broker]) -> None:
+    c, _ = client
+    r = c.post("/radios/vu/winlink/check", json={"profile": "vara_gw"})
+    assert r.status_code == 200, r.json()
+    plan = r.json()["lease"]["plan"]
+    assert len(plan) == 1 and plan[0]["key"] in ("N7VFM-2", "N7UHF-2")  # remote: one gateway
+
+
+def test_gateway_panel_usable_per_mode(client: tuple[TestClient, Broker]) -> None:
+    c, _ = client
+    gws = {g["call"]: g for g in c.get("/winlink/gateways?radio=vu").json()["gateways"]}
+    assert gws["N7VFM-2"]["usable"] and gws["N7UHF-2"]["usable"] and gws["K4FAR-10"]["usable"]
+    assert not gws["W4HF"]["usable"] and "no vara_hf profile" in gws["W4HF"]["reasons"][-1]
 
 
 def test_gateway_management(client: tuple[TestClient, Broker]) -> None:
