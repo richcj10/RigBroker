@@ -24,13 +24,19 @@ def _err(data: dict[str, Any]) -> str:
 
 def test_example_config_loads() -> None:
     cfg = load_config(ROOT / "config" / "profiles.yaml")
-    assert list(cfg.enabled_radios()) == ["vu"]
+    assert list(cfg.enabled_radios()) == ["vu", "hf"]
     vu = cfg.radios["vu"]
     assert vu.port == 4542 and vu.host == "127.0.0.1"
     assert vu.profiles["aprs"].freq == 144_390_000
     assert vu.tx_services() == {"direwolf@aprs", "direwolf@pkt", "vara-fm"}
     assert cfg.safety.stuck_tx_s == 90
-    assert not cfg.radios["hf"].enabled
+    hf = cfg.radios["hf"]
+    assert hf.default_profile == "off" and hf.profiles["off"].rig_power == "off"
+    man = hf.profiles["hf_manual"]
+    assert man.manual and man.freq_allowed(14_074_000) and not man.freq_allowed(14_400_000)
+    assert man.freq_allowed(5_357_000) and not man.freq_allowed(5_360_000)  # 60 m channels
+    assert hf.allowed_power_levels() == {"5W": 0.05, "10W": 0.10, "25W": 0.25}
+    assert hf.tune is not None and hf.tune.power <= 0.25 and hf.tab == "hf"
 
 
 def test_power_out_of_range() -> None:

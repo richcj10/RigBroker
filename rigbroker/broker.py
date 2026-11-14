@@ -272,6 +272,8 @@ class Broker:
         radios = config.enabled_radios()
         if mock:
             mock_rigs: dict[str, MockRig] = {rid: MockRig() for rid in radios}
+            for rid, m in mock_rigs.items():
+                m.tx_meters = radios[rid].tx_meters  # e.g. the FT-891's SWR/ALC/PO
             services = MockServiceController()
             jobs = MockJobRunner(duration_s=10.0, success_rate=0.6 if simulate else None)
             quiet: AprsLink | None = None

@@ -1,4 +1,4 @@
-﻿# RigBroker example configuration. Frequencies and callsigns are PLACEHOLDERS.
+# RigBroker example configuration. Frequencies and callsigns are PLACEHOLDERS.
 # Validate with:  rigbroker --check-config --config config/profiles.yaml
 radios:
   vu:
@@ -58,9 +58,39 @@ radios:
       rig_power_cut: null              # e.g. a relay script; run on stuck TX
   hf:
     name: FT-891
+    tab: hf                            # shown on the HF tab of the web UI
+    # Second Digirig on the 891's data port: CAT 9600 baud (menu 05-06), PTT = RTS.
+    # rigctld from deploy/rigctld-hf.service (Hamlib model 1036, FT-891).
     rigctld: 127.0.0.1:4543
-    default_profile: "off"
-    profiles: {}                       # empty = not managed yet
+    rigctld_service: rigctld-hf
+    default_profile: "off"             # powered off over CAT when no HF session runs
+    # TX power the web UI may choose (RFPOWER 0..1 = 0..100 W), capped at 25 W until the
+    # station has been tested for RF feedback (the ID-4100 at H locked up the Pi).
+    power_levels: {5W: 0.05, 10W: 0.10, 25W: 0.25}
+    max_power_level: 25W
+    # Tune button: steady carrier for the external auto-tuner (it tunes when it senses RF).
+    tune: {power: 0.10, mode: RTTY, seconds: 4}
+    tx_meters: true                    # SWR / ALC / power out while transmitting
+    band_memory_file: ~/.local/state/rigbroker/bands.json
+    profiles:
+      "off": {rig_power: "off"}
+      # Operator at the radio: tune from the web (HF tab) or the VFO knob. The broker follows
+      # the VFO and allows mic PTT - but transmitting outside these band edges (US Amateur
+      # Extra, incl. the five 60 m channels) or modes is a fault (TX inhibited).
+      hf_manual:
+        freq: 14200000
+        mode: USB
+        power: 0.10
+        manual: true
+        modes: [USB, LSB, CW, CWR, AM, FM, PKTUSB, PKTLSB, RTTY]
+        freq_ranges: [[1800000, 2000000], [3500000, 4000000],
+                      [5330500, 5333000], [5346500, 5349000], [5357000, 5359500],
+                      [5371500, 5374000], [5403500, 5406000],
+                      [7000000, 7300000], [10100000, 10150000], [14000000, 14350000],
+                      [18068000, 18168000], [21000000, 21450000], [24890000, 24990000],
+                      [28000000, 29700000], [50000000, 54000000]]
+        max_minutes: 120
+        transmits: true
 
 # TX power levels chosen in the web UI (per radio/profile) are saved here
 power_file: ~/.local/state/rigbroker/power.json

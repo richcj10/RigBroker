@@ -67,3 +67,19 @@ async def test_broker_switches_real_hamlib(make: MakeHarness, dummy_rigctld: int
     await h.wait_state(S.DEFAULT, timeout=6)
     assert await check.get_freq() == 144_390_000
     await check.close()
+
+
+async def test_set_ptt_and_tx_meters_against_real_hamlib(dummy_rigctld: int) -> None:
+    """set_ptt (used by the HF Tune button) goes through rigctld's T command."""
+    c = RigctldClient("127.0.0.1", dummy_rigctld, timeout=2)
+    try:
+        await c.set_ptt(True)
+        assert await c.get_ptt()
+        await c.set_ptt(False)
+        assert not await c.get_ptt()
+        await c.set_level("RFPOWER", 0.25)
+        assert abs(await c.get_level("RFPOWER") - 0.25) < 0.01
+        for meter in ("SWR", "ALC"):  # the dummy rig reports these levels
+            await c.get_level(meter)
+    finally:
+        await c.close()

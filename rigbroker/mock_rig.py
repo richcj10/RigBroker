@@ -10,6 +10,9 @@ from .rig_client import RigConnectionError, RigError, RigTimeout
 _DEFAULT_PASSBAND = {"FM": 15000, "FMN": 10000, "AM": 6000, "USB": 2400, "LSB": 2400}
 
 
+_TX_METERS = ("SWR", "ALC", "RFPOWER_METER_WATTS")
+
+
 class MockRig:
     """Implements RigClient in memory.
 
@@ -38,6 +41,9 @@ class MockRig:
         self.readback_override: dict[str, Any] = {}
         self.fail_commands: dict[str, int] = {}
         self.calls: list[tuple[str, tuple[Any, ...]]] = []
+        self.tx_meters = False  # an HF rig: SWR / ALC / power out readable while keyed
+        self.cat_ptt = False  # keyed over CAT (e.g. the Tune button), not by a modem
+        self.swr = 1.3
 
     def writes(self) -> list[tuple[str, tuple[Any, ...]]]:
         """All state-changing calls so far (for asserting the broker never wrote)."""
@@ -87,6 +93,10 @@ class MockRig:
         await self._call("get_ptt")
         return bool(self.readback_override.get("ptt", self.ptt))
 
+    async def set_ptt(self, on: bool) -> None:
+        await self._call("set_ptt", on)
+        self.ptt = self.cat_ptt = bool(on)
+
     async def get_dcd(self) -> bool:
         await self._call("get_dcd")
         return bool(self.readback_override.get("dcd", self.dcd))
@@ -96,6 +106,11 @@ class MockRig:
         key = name.upper()
         if key in self.readback_override:
             return float(self.readback_override[key])
+        if key not in self.levels and self.tx_meters and key in _TX_METERS:
+            if not self.ptt:
+                return 0.0
+            return {"SWR": self.swr, "ALC": 0.15,
+                    "RFPOWER_METER_WATTS": round(self.levels.get("RFPOWER", 0) * 100, 1)}[key]
         if key not in self.levels:
             raise RigError(f"get_level {key} failed: RPRT -1", -1)
         return self.levels[key]

@@ -77,11 +77,23 @@ class Profile(_Strict):
     freq_ranges: list[tuple[int, int]] = Field(
         default_factory=list, description="[low, high] Hz ranges a gateway frequency may use"
     )
+    manual: bool = Field(
+        default=False,
+        description="operator at the radio: tunable from the web inside freq_ranges/modes; "
+                    "the broker follows the VFO while it stays inside them and the "
+                    "operator may key the radio (mic PTT)")
+    modes: list[str] = Field(default_factory=list,
+                             description="modes allowed while tuning a manual profile")
 
     @field_validator("mode")
     @classmethod
     def _upper_mode(cls, v: str | None) -> str | None:
         return v.upper() if v else v
+
+    @field_validator("modes")
+    @classmethod
+    def _upper_modes(cls, v: list[str]) -> list[str]:
+        return [m.upper() for m in v]
 
     @field_validator("freq_ranges")
     @classmethod
@@ -130,6 +142,13 @@ class Profile(_Strict):
                              "from service")
         if self.freq is not None and self.freq_ranges and not self.freq_allowed(self.freq):
             raise ValueError(f"freq {self.freq} is outside this profile's freq_ranges")
+        if self.manual:
+            if not self.freq_ranges or not self.modes:
+                raise ValueError("manual profiles need freq_ranges and modes")
+            if self.mode not in self.modes:
+                raise ValueError(f"mode {self.mode} is not one of this profile's modes")
+            if self.run or self.winlink_mode:
+                raise ValueError("a manual profile cannot have run or winlink_mode")
         return self
 
 
@@ -162,6 +181,19 @@ class GpsConfig(_Strict):
     every_minutes: float = Field(default=10.0, gt=0)
 
 
+class TuneConfig(_Strict):
+    """Carrier for an external auto-tuner (it tunes when it senses RF)."""
+
+    power: float = Field(default=0.10, gt=0.0, le=1.0, description="RFPOWER while tuning")
+    mode: str = Field(default="RTTY", description="mode that sends a steady carrier with PTT")
+    seconds: float = Field(default=4.0, gt=0, le=10.0)
+
+    @field_validator("mode")
+    @classmethod
+    def _upper(cls, v: str) -> str:
+        return v.upper()
+
+
 class RadioConfig(_Strict):
     """One radio: its rigctld endpoint, profiles and default profile."""
 
@@ -186,6 +218,15 @@ class RadioConfig(_Strict):
     )
     profiles: dict[str, Profile] = Field(default_factory=dict)
     hooks: Hooks = Field(default_factory=Hooks)
+    tab: Literal["vhf", "hf"] = Field(
+        default="vhf",
+        description="web tabs showing this radio: vhf = APRS/VARA FM/Packet, hf = HF")
+    tune: TuneConfig | None = Field(
+        default=None, description="Tune button for an external auto-tuner (manual profiles)")
+    tx_meters: bool = Field(default=False,
+                            description="read SWR / ALC / power out while transmitting")
+    band_memory_file: str | None = Field(
+        default=None, description="last frequency/mode per band (manual tuning); null = memory")
 
     @field_validator("rigctld")
     @classmethod
@@ -217,6 +258,11 @@ class RadioConfig(_Strict):
         for name, v in self.power_levels.items():
             if not 0.0 <= v <= 1.0:
                 raise ValueError(f"power_levels.{name} must be 0..1, got {v}")
+        if self.tune is not None:
+            cap = self.power_levels.get(self.max_power_level or "", 1.0)
+            if self.tune.power > cap:
+                raise ValueError(f"tune.power {self.tune.power:g} is above the power cap "
+                                 f"{self.max_power_level} ({cap:g})")
         if self.max_power_level is not None and self.max_power_level not in self.power_levels:
             raise ValueError(f"max_power_level {self.max_power_level!r} is not one of "
                              f"power_levels ({', '.join(self.power_levels) or 'none'})")

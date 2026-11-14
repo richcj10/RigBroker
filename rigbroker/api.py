@@ -118,6 +118,11 @@ class PowerRequest(BaseModel):
     level: str = Field(max_length=10)
 
 
+class TuneRequest(BaseModel):
+    freq: int | None = Field(default=None, gt=0, description="Hz; omit to keep")
+    mode: str | None = Field(default=None, max_length=10, description="omit to keep")
+
+
 class InjectRequest(BaseModel):
     fault: str
 
@@ -488,6 +493,19 @@ def create_app(broker: Broker, *, manage_lifecycle: bool = True,
                         who: Principal = Depends(require_control),  # noqa: B008
     ) -> JSONResponse:
         ok, msg = await radio(rid).set_power_level(req.profile, req.level, by=who.name)
+        return JSONResponse({"ok": ok, "reason": msg}, status_code=200 if ok else 409)
+
+    @control.post("/radios/{rid}/tune")
+    async def retune(rid: str, req: TuneRequest,
+                     who: Principal = Depends(require_control),  # noqa: B008
+    ) -> JSONResponse:
+        ok, msg = await radio(rid).retune(req.freq, req.mode, by=who.name)
+        return JSONResponse({"ok": ok, "reason": msg}, status_code=200 if ok else 409)
+
+    @control.post("/radios/{rid}/atu")
+    async def atu(rid: str, who: Principal = Depends(require_control),  # noqa: B008
+    ) -> JSONResponse:
+        ok, msg = await radio(rid).tune_atu(by=who.name)
         return JSONResponse({"ok": ok, "reason": msg}, status_code=200 if ok else 409)
 
     @control.post("/radios/{rid}/fault/clear")

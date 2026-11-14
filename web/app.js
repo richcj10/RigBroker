@@ -180,6 +180,11 @@ $("#gps-dismiss").addEventListener("click", () => api("POST", "/gps/direwolf/dis
 // The APRS / VARA FM / Packet tabs show only what's needed while operating (chosen by the
 // user): frequency, TX, S-meter, TX power (adjustable) and Release. Full card: Station tab.
 const banners = new Map();  // radio id -> {el, f}
+// each radio's banner shows on its own tabs: VHF radios on APRS / VARA FM / Packet, HF on HF
+function bannerTabs() {
+  const want = document.body.dataset.view === "hf" ? "hf" : "vhf";
+  for (const b of banners.values()) b.el.hidden = b.tab !== want;
+}
 function updateBanner(id, r) {
   let b = banners.get(id);
   if (!b) {
@@ -203,7 +208,7 @@ function updateBanner(id, r) {
     el.querySelectorAll("[data-b]").forEach((n) => (f[n.dataset.b] = n));
     f.release.addEventListener("click", () => api("POST", `/radios/${id}/release`, { holder: "web" }));
     $("#banners").append(el);
-    b = { el, f };
+    b = { el, f, tab: r.tab || "vhf" };
     banners.set(id, b);
   }
   const { f } = b;
@@ -334,6 +339,7 @@ function render() {
   $("#txmode").className = "pill " + (status.allow_tx ? "ok" : "warn");
   for (const [id, r] of Object.entries(status.radios)) { updateCard(id, r, status.mock); updateBanner(id, r); }
   renderGpsPrompt(status.gps);
+  bannerTabs();
   if (window.onStatus) window.onStatus(status);
   winlinkHelpState(status);
   const sched = $("#schedule");
@@ -595,8 +601,8 @@ fillWinlinkHelp();
 // ---------------------------------------------------------------- views (tabs)
 // An element shows on every view it has a view-<name> class for (e.g. the radio card is on
 // Station, VARA FM and Packet); everything else with a view-* class is hidden.
-const VIEWS = ["station", "aprs", "vara", "packet"];
-const VIEW_TITLES = { aprs: "APRS", vara: "VARA FM", packet: "Packet" };
+const VIEWS = ["station", "aprs", "vara", "packet", "hf"];
+const VIEW_TITLES = { aprs: "APRS", vara: "VARA FM", packet: "Packet", hf: "HF" };
 function showView() {
   let v = location.hash.replace("#", "");
   if (!VIEWS.includes(v) || (v === "aprs" && $("#nav-aprs").hidden && window.aprsKnown === false)) v = "station";
@@ -608,6 +614,7 @@ function showView() {
   document.querySelectorAll(".views a").forEach((a) => a.classList.toggle("on", a.dataset.view === v));
   document.title = VIEW_TITLES[v] ? `${VIEW_TITLES[v]} · RigBroker` : "RigBroker";
   if (gwData) renderGateways(gwData);  // the gateway list follows the tab (VARA FM / packet)
+  bannerTabs();
   if (window.onViewChange) window.onViewChange(v);
 }
 window.addEventListener("hashchange", showView);

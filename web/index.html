@@ -22,6 +22,7 @@
       <a href="#aprs" data-view="aprs" id="nav-aprs" hidden>APRS <span class="badge" id="nav-badge" hidden></span></a>
       <a href="#vara" data-view="vara">VARA FM</a>
       <a href="#packet" data-view="packet">Packet</a>
+      <a href="#hf" data-view="hf" id="nav-hf" hidden>HF</a>
     </nav>
     <div class="top-right">
       <div class="conn"><span id="conn-dot" class="dot"></span><span id="conn-text">connecting…</span></div>
@@ -44,7 +45,37 @@
 
     <section id="radios" class="radios view-station" aria-live="polite"></section>
     <!-- compact "radio in operation" banner for the APRS / VARA FM / Packet tabs -->
-    <section id="banners" class="banners view-aprs view-vara view-packet" aria-live="polite"></section>
+    <section id="banners" class="banners view-aprs view-vara view-packet view-hf" aria-live="polite"></section>
+
+    <section class="panel view-hf" id="hf-panel" hidden>
+      <div class="log-head">
+        <div>
+          <h2 id="hf-title">HF</h2>
+          <div class="sub" id="hf-sub"></div>
+        </div>
+        <button type="button" id="hf-start">Start HF session</button>
+      </div>
+      <div id="hf-controls">
+        <div class="hf-row">
+          <form id="hf-freq-form" class="hf-freq">
+            <label>Frequency (MHz)
+              <input name="mhz" id="hf-mhz" type="number" step="0.0001" min="1.8" max="54" autocomplete="off"></label>
+            <button type="submit">Set</button>
+          </form>
+          <label class="hf-mode">Mode <select id="hf-mode"></select></label>
+          <button type="button" class="tune" id="hf-tune" hidden title="Short low-power carrier for the auto-tuner">Tune</button>
+        </div>
+        <div class="hf-steps" id="hf-steps"></div>
+        <div class="hf-bands" id="hf-bands"></div>
+        <div class="hf-meters" id="hf-meters">
+          <div class="hf-meter"><span>SWR</span><div class="meter-bar"><div class="meter-fill" data-m="swr"></div></div><b data-v="swr">—</b></div>
+          <div class="hf-meter"><span>ALC</span><div class="meter-bar"><div class="meter-fill" data-m="alc"></div></div><b data-v="alc">—</b></div>
+          <div class="hf-meter"><span>Power</span><div class="meter-bar"><div class="meter-fill" data-m="po"></div></div><b data-v="po">—</b></div>
+        </div>
+        <p class="sub">Tuning is limited to the allowed band edges and modes. The VFO knob works too - the page follows it.
+          Transmitting outside the band edges puts the radio in FAULT (TX inhibited).</p>
+      </div>
+    </section>
 
     <section class="panel view-aprs" id="aprs-panel" hidden>
       <div class="log-head">
@@ -363,5 +394,6 @@
   <script src="/static/app.js"></script>
   <script src="/static/aprs.js"></script>
   <script src="/static/bbs.js"></script>
+  <script src="/static/hf.js"></script>
 </body>
 </html>

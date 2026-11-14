@@ -34,6 +34,10 @@ class Telemetry:
     # interface presence from the last check: {"serial": bool|None, "audio": bool|None}
     interface: dict[str, bool | None] | None = None
     tx_since: float | None = None  # monotonic
+    # TX meters (HF rigs with tx_meters): only while transmitting, else None
+    swr: float | None = None
+    alc: float | None = None
+    po_w: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -75,7 +79,8 @@ class TelemetryPoller:
     """
 
     def __init__(self, rig: RigClient, safety: SafetyConfig, tel: Telemetry,
-                 cb: PollerCallbacks) -> None:
+                 cb: PollerCallbacks, *, tx_meters: bool = False) -> None:
+        self.tx_meters = tx_meters
         self.rig = rig
         self.safety = safety
         self.tel = tel
@@ -95,6 +100,14 @@ class TelemetryPoller:
                 log.exception("telemetry poll crashed; continuing")
                 delay = self.safety.poll_interval_s
             await asyncio.sleep(delay)
+
+    async def _meter(self, name: str) -> float | None:
+        try:
+            return round(await self.rig.get_level(name), 2)
+        except (RigTimeout, RigConnectionError):
+            return None  # next poll will judge the link
+        except RigError:
+            return None  # not supported by this rig
 
     async def poll_once(self) -> float:
         """Do one poll; return the delay before the next one."""
@@ -152,6 +165,11 @@ class TelemetryPoller:
             assert t.freq is not None and t.mode is not None
             freq, mode, dcd, strength = t.freq, t.mode, bool(t.dcd), t.strength
         t.ptt = ptt
+        if not ptt:
+            t.swr = t.alc = t.po_w = None
+        elif full and self.tx_meters:  # meters ride on full polls only (PTT latency)
+            t.swr, t.alc, t.po_w = (await self._meter("SWR"), await self._meter("ALC"),
+                                    await self._meter("RFPOWER_METER_WATTS"))
         t.failures, t.online, t.last_ok, t.last_error = 0, True, time.time(), None
         t.failure = None
         self._offline_announced = False

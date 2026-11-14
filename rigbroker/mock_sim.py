@@ -85,7 +85,7 @@ class MockActivity:
                         tx_until, next_tx = now + 0.8, now + rng.uniform(15, 40)
                     else:  # packet / VARA session traffic
                         tx_until, next_tx = now + rng.uniform(0.5, 2.5), now + rng.uniform(2, 6)
-                rig.ptt = bool(tx_svcs) and now < tx_until
+                rig.ptt = rig.cat_ptt or (bool(tx_svcs) and now < tx_until)
             if rig.ptt:
                 rig.dcd = False
                 rig.levels["STRENGTH"] = 60.0

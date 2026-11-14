@@ -10,11 +10,15 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
+import os
+import tempfile
 import time
 from collections import deque
 from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, TypeVar
 
 from .config import Profile, RadioConfig, SafetyConfig
@@ -35,6 +39,7 @@ from .rig_client import RigClient, RigError
 from .services import ServiceController, ServiceError, restart
 from .state import Act, Ctx, Ev, RadioState, transition
 from .telemetry import Sample, Telemetry, TelemetryPoller
+from .winlink import band_of
 
 log = logging.getLogger("rigbroker.radio")
 
@@ -92,6 +97,37 @@ class FaultInfo:
         return dict(self.__dict__)
 
 
+class BandMemory:
+    """Last frequency + mode per amateur band (manual tuning), optionally saved to a file."""
+
+    def __init__(self, path: str | None) -> None:
+        self.path = Path(os.path.expanduser(path)) if path else None
+        self.data: dict[str, dict[str, Any]] = {}
+        if self.path is not None and self.path.exists():
+            try:
+                raw = json.loads(self.path.read_text(encoding="utf-8"))
+                self.data = {str(b): {"freq": int(v["freq"]), "mode": str(v["mode"])}
+                             for b, v in raw.items()}
+            except (OSError, ValueError, KeyError, TypeError) as exc:
+                log.warning("band memory %s unreadable (%s); starting empty", self.path, exc)
+
+    def remember(self, freq: int, mode: str) -> None:
+        band = band_of(freq)
+        if band is None or self.data.get(band) == {"freq": freq, "mode": mode}:
+            return
+        self.data[band] = {"freq": freq, "mode": mode}
+        if self.path is None:
+            return
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            fd, tmp = tempfile.mkstemp(dir=self.path.parent, prefix=".bands-", suffix=".json")
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(self.data, f)
+            os.replace(tmp, self.path)
+        except OSError as exc:
+            log.warning("could not save band memory: %s", exc)
+
+
 class RadioController:
     """Single owner of one radio."""
 
@@ -135,7 +171,13 @@ class RadioController:
         self.fault: FaultInfo | None = None
         self.last_fault: FaultInfo | None = None
         self.telemetry = Telemetry()
-        self.poller = TelemetryPoller(rig, safety, self.telemetry, self)
+        self.poller = TelemetryPoller(rig, safety, self.telemetry, self,
+                                      tx_meters=cfg.tx_meters)
+        self.applied_mode: str | None = None  # verified mode (manual tuning can change it)
+        self.band_memory = BandMemory(cfg.band_memory_file)
+        self._swr_warned = False
+        # samples taken before the broker itself retuned / tuned are stale for VFO following
+        self._follow_after = 0.0
         self.unavailable: dict[str, str] = {}  # profile -> why it can't run right now
         self.position: Position | None = None  # from the radio's GPS (cfg.gps)
 
@@ -522,6 +564,10 @@ class RadioController:
             "state_for_s": round(time.monotonic() - self.state_since, 1),
             "applied_profile": self.applied,
             "applied_freq": self.applied_freq,
+            "applied_mode": self.applied_mode,
+            "tab": self.cfg.tab,
+            "tune": self.cfg.tune.model_dump() if self.cfg.tune else None,
+            "band_memory": self.band_memory.data,
             "target_profile": self.target,
             "default_profile": self.cfg.default_profile,
             "winlink_profile": self.cfg.winlink_profile,
@@ -541,10 +587,147 @@ class RadioController:
                     "service": p.service, "run": p.run,
                     "transmits": p.transmits, "preemptible": p.preemptible,
                     "max_minutes": p.max_minutes, "rig_power": p.rig_power,
-                    "winlink_mode": p.winlink_mode, "unavailable": self.unavailable.get(n)}
+                    "winlink_mode": p.winlink_mode, "unavailable": self.unavailable.get(n),
+                    "manual": p.manual, "modes": p.modes, "freq_ranges": p.freq_ranges}
                 for n, p in self.cfg.profiles.items()
             },
         }
+
+    # ------------------------------------------------------------------ manual (HF) operation
+
+    def manual_profile(self) -> Profile | None:
+        """The active profile if it is a manual one (operator at the radio), else None."""
+        if self.state is not RadioState.ACTIVE or self.applied is None:
+            return None
+        p = self.cfg.profiles[self.applied]
+        return p if p.manual else None
+
+    def _follow_vfo(self, prof: Profile, sample: Sample) -> None:
+        """Manual profile: the VFO knob belongs to the operator - just keep track of it."""
+        if sample.freq != self.applied_freq or sample.mode != self.applied_mode:
+            self.applied_freq, self.applied_mode = sample.freq, sample.mode
+            if prof.freq_allowed(sample.freq) and sample.mode in prof.modes:
+                self.band_memory.remember(sample.freq, sample.mode)
+
+    def _check_swr(self) -> None:
+        swr = self.telemetry.swr
+        if not self.telemetry.ptt:
+            self._swr_warned = False
+        elif swr is not None and swr > 3.0 and not self._swr_warned:
+            self._swr_warned = True
+            self._emit("swr", f"high SWR {swr:.1f}:1 while transmitting - check the antenna "
+                              "/ tuner", "warning")
+
+    async def retune(self, freq: int | None, mode: str | None, *, by: str) -> tuple[bool, str]:
+        """Change frequency and/or mode during a manual session (inside its band edges)."""
+        async with self._lock:
+            prof = self.manual_profile()
+            if prof is None:
+                return False, "start a manual session first (tuning needs a manual profile)"
+            try:
+                keyed = await self.rig.get_ptt()  # live, not the last poll
+            except RigError as exc:
+                return False, f"rig error: {exc}"
+            if keyed:
+                return False, "the radio is transmitting"
+            f = self.applied_freq if freq is None else int(freq)
+            m = (mode or self.applied_mode or prof.mode or "").upper()
+            if f is None or not prof.freq_allowed(f):
+                return False, (f"{(f or 0) / 1e6:.4f} MHz is outside the allowed band edges "
+                               f"of {self.applied}")
+            if m not in prof.modes:
+                return False, f"mode {m} is not allowed here ({', '.join(prof.modes)})"
+            try:
+                await self.rig.set_freq(f)
+                await self.rig.set_mode(m, 0)
+                got_f = await self.rig.get_freq()
+                got_m, _ = await self.rig.get_mode()
+            except RigError as exc:
+                return False, f"rig error: {exc}"
+            self.telemetry.freq, self.telemetry.mode = got_f, got_m
+            if abs(got_f - f) > self.safety.freq_tolerance_hz or got_m != m:
+                return False, f"read-back mismatch: radio reports {got_f} Hz {got_m}"
+            self.applied_freq, self.applied_mode = f, m
+            self.band_memory.remember(f, m)
+            self._follow_after = time.monotonic()
+        self._emit("retune", f"tuned to {f / 1e6:.4f} MHz {m} by {by}")
+        return True, f"{f / 1e6:.4f} MHz {m}"
+
+    async def tune_atu(self, *, by: str) -> tuple[bool, str]:
+        """Send a short low-power carrier so an external auto-tuner can tune.
+
+        Only in a manual session, never above the power cap, PTT is always released, and
+        mode + power are restored afterwards. A PTT that will not release is a fault.
+        """
+        t = self.cfg.tune
+        if t is None:
+            return False, "no tuner configured for this radio"
+        if not self.allow_tx:
+            return False, "transmit disabled (--allow-tx not set)"
+        async with self._lock:
+            prof = self.manual_profile()
+            if prof is None:
+                return False, "start a manual session first"
+            if self.fault is not None:
+                return False, "radio is in FAULT (TX inhibited)"
+            try:
+                keyed = await self.rig.get_ptt()  # live, not the last poll
+            except RigError as exc:
+                return False, f"rig error: {exc}"
+            if keyed:
+                return False, "already transmitting"
+            if not (self.applied_freq and prof.freq_allowed(self.applied_freq)):
+                return False, "the radio is outside the allowed band edges"
+            levels = self.cfg.allowed_power_levels()
+            cap = max(levels.values()) if levels else 1.0
+            power = min(t.power, cap)
+            mode = self.applied_mode or prof.mode or t.mode
+            try:
+                restore_power = await self.rig.get_level("RFPOWER")
+            except RigError as exc:
+                return False, f"rig error: {exc}"
+            self._emit("tune", f"tune carrier: {t.mode} at {power * 100:.0f}% for "
+                               f"{t.seconds:g} s ({self.applied_freq / 1e6:.4f} MHz) by {by}")
+            try:
+                await self.rig.set_mode(t.mode, 0)
+                await self.rig.set_level("RFPOWER", power)
+                await self.rig.set_ptt(True)
+                # the poller waits behind this lock: read the TX meters here instead
+                end = time.monotonic() + t.seconds
+                while (left := end - time.monotonic()) > 0:
+                    await asyncio.sleep(min(1.0, left))
+                    if self.cfg.tx_meters:
+                        await self._read_tx_meters()
+            except RigError as exc:
+                self._emit("tune", f"tune aborted: {exc}", "warning")
+            finally:
+                try:
+                    await self.rig.set_ptt(False)
+                except RigError as exc:
+                    self._fire_locked(Ev.STUCK_TX,
+                                      reason=f"PTT did not release after tune: {exc}")
+                    return False, "PTT did not release - radio in FAULT"
+                try:
+                    await self.rig.set_mode(mode, 0)
+                    await self.rig.set_level("RFPOWER", restore_power)
+                except RigError as exc:
+                    self._emit("tune", f"could not restore {mode} / power: {exc}", "warning")
+                self._follow_after = time.monotonic()
+        swr = self.telemetry.swr
+        result = f"tuned, SWR {swr:.1f}:1" if swr is not None else "tuned"
+        self._emit("tune", result + (" - high, check the antenna" if swr and swr > 3 else ""),
+                   "warning" if swr and swr > 3 else "info")
+        return True, result
+
+    async def _read_tx_meters(self) -> None:
+        t = self.telemetry
+        try:
+            t.ptt = True
+            t.swr = round(await self.rig.get_level("SWR"), 2)
+            t.alc = round(await self.rig.get_level("ALC"), 2)
+            t.po_w = round(await self.rig.get_level("RFPOWER_METER_WATTS"), 2)
+        except RigError:
+            pass  # unsupported or busy: the poller reads them on its next full poll
 
     # ------------------------------------------------------------------ poller callbacks
 
@@ -555,7 +738,18 @@ class RadioController:
         async with self._lock:
             if (self.state in (RadioState.DEFAULT, RadioState.ACTIVE) and self.applied
                     and sample.started_mono >= self.state_since):
-                if sample.ptt and self.consumer not in self.cfg.tx_services():
+                prof = self.cfg.profiles[self.applied]
+                if prof.manual:  # operator at the radio: follow the VFO, allow mic PTT
+                    if sample.fresh and sample.started_mono >= self._follow_after:
+                        self._follow_vfo(prof, sample)
+                    if sample.ptt and not (prof.freq_allowed(sample.freq)
+                                           and sample.mode in prof.modes):
+                        self._fire_locked(Ev.UNEXPECTED_TX, reason=(
+                            f"transmitting outside the allowed band edges/modes "
+                            f"({sample.freq / 1e6:.4f} MHz {sample.mode})"))
+                        return
+                    self._check_swr()
+                elif sample.ptt and self.consumer not in self.cfg.tx_services():
                     # Nothing RigBroker runs can transmit right now, yet the rig is keyed:
                     # someone/something keyed it outside the broker's control.
                     self._fire_locked(Ev.UNEXPECTED_TX, reason=(
@@ -563,8 +757,10 @@ class RadioController:
                         f"(profile {self.applied}, consumer {self.consumer or 'none'}): "
                         "keyed outside RigBroker?"))
                     return
-                if sample.fresh:  # cached readings can predate a switch: never judge them
+                elif sample.fresh:  # cached readings can predate a switch: never judge them
                     self._check_drift(sample)
+                if not prof.manual:
+                    self._check_swr()
             lease = self.lease
             if (self.state is RadioState.ACTIVE and lease is not None
                     and lease.started_mono is not None
@@ -861,6 +1057,7 @@ class RadioController:
             await self._step(3, "set_rig", self._apply(prof, rig_off, freq))
             await self._step(4, "verify", self._verify(prof, freq))
             self.applied, self.applied_freq = target, freq
+            self.applied_mode = prof.mode
             self._drift_warned = False
             if prof.transmits:
                 await self._step(5, "clear_channel", self._wait_clear(is_default))
@@ -1023,8 +1220,9 @@ class RadioController:
         bad = []
         if abs(sample.freq - want) > self.safety.freq_tolerance_hz:
             bad.append(f"freq {sample.freq} != {want}")
-        if prof.mode and sample.mode != prof.mode:
-            bad.append(f"mode {sample.mode} != {prof.mode}")
+        want_mode = self.applied_mode or prof.mode
+        if want_mode and sample.mode != want_mode:
+            bad.append(f"mode {sample.mode} != {want_mode}")
         if not bad:
             return
         msg = "rig changed outside the broker: " + "; ".join(bad)
