@@ -196,6 +196,13 @@
         el("td", null, s.via),
         el("td", "num", String(s.packets)),
         el("td", "sub", s.weather ? wxShort(s.weather) : (s.status || s.comment || "")));
+      const act = el("td");
+      const mb = el("button", "ghost small", "Message");
+      mb.type = "button";
+      mb.title = `Send ${s.call} a message (${(s.route && s.route.label) || "route unknown"})`;
+      mb.addEventListener("click", () => composeTo(s.call));
+      act.append(mb);
+      tr.append(act);
       if (s.weather) {
         tr.className = "has-wx";
         tr.title = wxTitle(`${s.call} weather (${ago(s.wx_heard)})`, s.weather);
@@ -243,12 +250,13 @@
     for (const m of list) {
       const li = el("li", (m.direction === "out" ? "out" : "in") + (m.mine ? "" : " other"));
       const who = el("span", "who", m.direction === "out" ? `→ ${m.peer}` : `← ${m.peer}${m.mine ? "" : ` (to ${m.to})`}`);
-      who.title = "Reply to this station";
-      who.addEventListener("click", () => { const f = $("#msg-form"); f.to.value = m.peer; f.text.focus(); });
+      li.title = `Click to message ${m.peer}`;
+      li.addEventListener("click", (ev) => { if (!ev.target.closest("button")) composeTo(m.peer); });
       const meta = el("span", "meta");
       if (m.direction === "out") {
         const label = { sending: "sending", retrying: `retrying (${m.tries})`, acked: "✓ delivered", rejected: "✗ rejected", failed: "✗ no ack", cancelled: "cancelled" }[m.state] || m.state;
-        meta.append(el("span", `state-${m.state}`, label), document.createTextNode(` · ${fmtTime(m.ts)}`));
+        meta.append(el("span", `state-${m.state}`, label),
+          document.createTextNode(` · ${fmtTime(m.ts)}${m.route ? ` · ${m.route}` : ""}`));
         if (m.state === "sending" || m.state === "retrying") {
           const c = el("button", "ghost small", "Cancel");
           c.type = "button";
@@ -269,6 +277,22 @@
 
   const form = $("#msg-form");
   form.text.addEventListener("input", () => ($("#msg-count").textContent = `${form.text.value.length}/67`));
+  // Route preview: the broker decides (heard direct -> direct then WIDE; via a digi -> that
+  // digi; not heard -> WIDE). Each station carries its route; this only shows it.
+  function showRoute() {
+    const to = form.to.value.trim().toUpperCase();
+    const st = to ? S.stations.get(to) : null;
+    $("#msg-route").textContent = !to ? ""
+      : st && st.route && st.route.label ? `Route: ${st.route.label}`
+      : "Route: via the default WIDE path (station not heard yet)";
+  }
+  form.to.addEventListener("input", showRoute);
+  function composeTo(call) {
+    setTab("msgs");
+    form.to.value = call;
+    showRoute();
+    form.text.focus();
+  }
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     const res = await api("POST", "/aprs/messages", { to: form.to.value.trim().toUpperCase(), text: form.text.value }, { quiet: true });
@@ -277,7 +301,7 @@
   });
 
   // ------------------------------------------------------------ data
-  function addStation(s) { S.stations.set(s.call, s); updateMarker(s); }
+  function addStation(s) { S.stations.set(s.call, s); updateMarker(s); showRoute(); }
   async function init() {
     let r;
     try { r = await fetch("/aprs", { credentials: "same-origin" }); } catch { return; }

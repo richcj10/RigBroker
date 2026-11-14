@@ -405,3 +405,8 @@ tr.has-wx td:last-child { color: #2f7bd9; }
 .panel.notice { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px;
   border-color: var(--info); box-shadow: inset 4px 0 0 var(--info), var(--shadow); }
 .panel.notice .acts { display: flex; gap: 8px; }
+
+/* APRS direct messages: click a message to reply; route preview under the form */
+.msgs li { cursor: pointer; }
+.msgs li:hover { background: var(--surface-2); }
+.msg-route { margin-top: 4px; color: var(--info); }

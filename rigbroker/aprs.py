@@ -104,6 +104,8 @@ class Station:
     last_heard: float = 0.0
     packets: int = 0
     via: str = "direct"
+    via_path: list[str] = field(default_factory=list)  # digipeaters used, in order
+    route: dict[str, Any] = field(default_factory=dict)  # how a DM to it is sent (route_for)
     speed_kmh: float | None = None
     course: int | None = None
     altitude_m: float | None = None
@@ -126,6 +128,9 @@ class Message:
     tries: int = 0
     next_try: float = 0.0
     id: str = field(default_factory=lambda: uuid.uuid4().hex[:10])
+    path: list[str] = field(default_factory=list)  # first try ([] = direct)
+    retry_path: list[str] = field(default_factory=list)  # later tries
+    route: str = ""  # human-readable, e.g. "via W7MOT-6"
 
 
 @dataclass
@@ -137,6 +142,27 @@ class PacketRec:
     src: str
     summary: str
     wx: dict[str, float] | None = None  # weather carried by this packet (for the hover)
+
+
+_GENERIC_HOP = re.compile(r"^(WIDE|TRACE|RELAY|TEMP)\d?(-\d{1,2})?$")
+
+
+def route_for(st: Station | None, wide: list[str]) -> dict[str, Any]:
+    """How a direct message to a station is sent (user's rules):
+
+    * heard direct              -> first try direct (no digipeating), retries via ``wide``
+    * heard via digipeater(s)   -> back through the same digipeater(s), every try
+    * not heard / generic hops  -> ``wide`` (e.g. WIDE1-1,WIDE2-1), every try
+    """
+    w = ",".join(wide) or "direct"
+    if st is None:
+        return {"path": list(wide), "retry_path": list(wide), "label": f"via {w} (not heard yet)"}
+    if not st.via_path:
+        return {"path": [], "retry_path": list(wide), "label": f"direct, then {w} if no ack"}
+    if any(_GENERIC_HOP.match(h) for h in st.via_path):  # digi didn't put its call in
+        return {"path": list(wide), "retry_path": list(wide), "label": f"via {w}"}
+    back = list(reversed(st.via_path))  # the digi nearest to us goes first
+    return {"path": back, "retry_path": back, "label": f"via {','.join(back)}"}
 
 
 def bearing_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> tuple[float, float]:
@@ -254,6 +280,7 @@ class AprsService:
         path = [str(x) for x in p.get("path", [])]
         used = [x.rstrip("*") for x in path if x.endswith("*")]
         st.via = used[-1] if used else "direct"
+        st.via_path = used
         if "latitude" in p and "longitude" in p:
             st.lat, st.lon = float(p["latitude"]), float(p["longitude"])
             st.symbol = f"{p.get('symbol_table', '/')}{p.get('symbol', '/')}"
@@ -268,6 +295,7 @@ class AprsService:
             st.weather, st.wx_heard = wx, time.time()
             if p.get("format") == "wx" and p.get("comment"):  # positionless: e.g. ".DsVP"
                 st.comment = str(p["comment"])[:80]
+        st.route = route_for(st, self.cfg.msg_path)
         me = self.position()
         if me and st.lat is not None and st.lon is not None:
             st.distance_km, st.bearing = bearing_distance(me[0], me[1], st.lat, st.lon)
@@ -327,8 +355,13 @@ class AprsService:
 
     # ---------------------------------------------------------------- transmit
 
-    def _head(self) -> str:
-        return f"{self.callsign}>{','.join([self.cfg.tocall, *self.cfg.msg_path])}"
+    def _head(self, path: list[str] | None = None) -> str:
+        hops = self.cfg.msg_path if path is None else path
+        return f"{self.callsign}>{','.join([self.cfg.tocall, *hops])}"
+
+    def route_for(self, call: str) -> dict[str, Any]:
+        """How a message to ``call`` goes out (see :func:`route_for`)."""
+        return route_for(self.stations.get(call), self.cfg.msg_path)
 
     async def _transmit(self, tnc2: str, fmt: str, peer: str, summary: str) -> None:
         ok, why = self.tx_gate()
@@ -352,7 +385,9 @@ class AprsService:
         ok, why = self.tx_gate()
         if not ok:
             raise AprsError(why)
-        m = Message("out", dest, dest, body, str(next(self._msgno) % 100000), "sending")
+        r = self.route_for(dest)
+        m = Message("out", dest, dest, body, str(next(self._msgno) % 100000), "sending",
+                    path=r["path"], retry_path=r["retry_path"], route=r["label"])
         self.messages.append(m)
         await self._send_try(m)
         return m
@@ -370,8 +405,10 @@ class AprsService:
         m.tries += 1
         m.next_try = time.monotonic() + self.cfg.msg_retry_s * 2 ** (m.tries - 1)
         try:
-            await self._transmit(f"{self._head()}::{m.to:<9}:{m.text}{{{m.msgno}", "message",
-                                 m.peer, f"to {m.peer}: {m.text} (try {m.tries})")
+            path = m.path if m.tries == 1 else m.retry_path
+            hops = ",".join(path) or "direct"
+            await self._transmit(f"{self._head(path)}::{m.to:<9}:{m.text}{{{m.msgno}", "message",
+                                 m.peer, f"to {m.peer}: {m.text} (try {m.tries}, {hops})")
         except AprsError as exc:
             self.events.emit("aprs", f"message {m.msgno} to {m.peer} not sent: {exc}",
                              level="warning")
