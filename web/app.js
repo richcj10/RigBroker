@@ -135,9 +135,16 @@ function buildCard(id, r) {
   el.querySelectorAll("[data-inject]").forEach((b) =>
     b.addEventListener("click", () => api("POST", `/mock/${id}/inject`, { fault: b.dataset.inject })));
   $("#radios").append(el);
-  const card = { el, f };
+  const card = { el, f, sig: profileSig(r) };
   cards.set(id, card);
   return card;
+}
+
+// What the profile buttons are built from. When the broker restarts with a changed config
+// (e.g. a profile becomes a Winlink profile), the card is rebuilt - no page reload needed.
+function profileSig(r) {
+  return JSON.stringify([r.default_profile, r.winlink_profile, Object.entries(r.profiles).map(([n, p]) =>
+    [n, p.freq, p.mode, p.rig_power, p.transmits, p.max_minutes, p.winlink_mode, !!p.run])]);
 }
 
 function setChip(el, text, cls) {
@@ -146,7 +153,13 @@ function setChip(el, text, cls) {
 }
 
 function updateCard(id, r, mock) {
-  const { f } = cards.get(id) || buildCard(id, r);
+  let card = cards.get(id);
+  if (card && card.sig !== undefined && card.sig !== profileSig(r)) {
+    const old = card.el;
+    card = buildCard(id, r);   // appended at the end; put it back where the old card was
+    old.replaceWith(card.el);
+  }
+  const { f } = card || buildCard(id, r);
   const t = r.telemetry;
   const prof = r.applied_profile ? r.profiles[r.applied_profile] : null;
 
