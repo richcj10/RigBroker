@@ -384,3 +384,19 @@ tr.has-wx td:last-child { color: #2f7bd9; }
 .term .t-sys { color: #8fb6e8; font-style: italic; }
 .bbs-input { display: flex; gap: 8px; margin-top: 8px; }
 .bbs-input input { flex: 1; min-width: 0; font-family: var(--mono); }
+
+/* compact radio banner (APRS / VARA FM / Packet tabs) */
+.banners { display: grid; gap: 10px; }
+.banner {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+  box-shadow: var(--shadow); padding: 10px 16px;
+}
+.banner .b-name { font-weight: 600; color: var(--muted); font-size: 14px; }
+.banner .b-freq { font: 600 22px/1 var(--mono); font-variant-numeric: tabular-nums; }
+.banner .b-freq small { font-size: 13px; color: var(--muted); margin-left: 6px; }
+.banner .b-meter { display: flex; align-items: center; gap: 8px; flex: 1 1 180px; min-width: 160px; max-width: 360px; }
+.banner .b-meter .meter-bar { flex: 1; }
+.banner .meter-val { font: 13px var(--mono); min-width: 52px; }
+.banner .pwr { margin: 0; }
+.banner .b-fault { flex-basis: 100%; color: var(--bad); font-weight: 600; font-size: 14px; }

@@ -152,6 +152,65 @@ function setChip(el, text, cls) {
   el.className = "chip" + (cls ? " " + cls : "");
 }
 
+function profileText(r) {
+  let t = r.applied_profile || "—";
+  if (r.target_profile && r.target_profile !== r.applied_profile) t += ` → ${r.target_profile}`;
+  const plan = r.lease && r.lease.plan && r.lease.plan.length ? r.lease.plan : null;
+  if (plan) {
+    const step = plan[r.lease.attempt];
+    t += ` via ${step.label}${plan.length > 1 ? ` (${r.lease.attempt + 1}/${plan.length})` : ""}`;
+  }
+  return t;
+}
+
+// ---------------------------------------------------------------- compact radio banner
+// The APRS / VARA FM / Packet tabs show only what's needed while operating (chosen by the
+// user): frequency, TX, S-meter, TX power (adjustable) and Release. Full card: Station tab.
+const banners = new Map();  // radio id -> {el, f}
+function updateBanner(id, r) {
+  let b = banners.get(id);
+  if (!b) {
+    const el = document.createElement("div");
+    el.className = "banner";
+    el.innerHTML = `
+      <span class="b-name" data-b="name"></span>
+      <div class="b-freq"><span data-b="freq">—</span><small data-b="mode"></small></div>
+      <span class="ind tx" data-b="tx">TX</span>
+      <div class="b-meter" title="S-meter (receive strength)">
+        <div class="meter-bar"><div class="meter-fill" data-b="smeter"></div></div>
+        <span class="meter-val" data-b="sval">—</span>
+      </div>
+      <div class="pwr" data-b="pwr" hidden>
+        <span class="pwr-label">Power <small data-b="pwr-prof"></small></span>
+        <span class="pwr-btns" data-b="pwr-btns"></span>
+      </div>
+      <button type="button" class="small" data-b="release" hidden>Release</button>
+      <div class="b-fault" data-b="fault" hidden></div>`;
+    const f = {};
+    el.querySelectorAll("[data-b]").forEach((n) => (f[n.dataset.b] = n));
+    f.release.addEventListener("click", () => api("POST", `/radios/${id}/release`, { holder: "web" }));
+    $("#banners").append(el);
+    b = { el, f };
+    banners.set(id, b);
+  }
+  const { f } = b;
+  const t = r.telemetry;
+  const live = t.online && t.polling;
+  const prof = r.applied_profile ? r.profiles[r.applied_profile] : null;
+  f.name.textContent = r.name;
+  f.freq.textContent = live ? fmtFreq(t.freq) : (t.polling ? "offline" : "rig off");
+  f.mode.textContent = live ? (t.mode || "") : "";
+  f.tx.classList.toggle("on", !!(live && t.ptt));
+  f.smeter.style.width = `${live ? meterPct(t.strength) : 0}%`;
+  f.smeter.style.setProperty("--full", `${10000 / Math.max(1, meterPct(t.strength))}%`);
+  f.sval.textContent = live ? sUnits(t.strength) : "—";
+  renderPower(id, r, f, prof);  // same L / M / H picker as the radio card
+  f.release.hidden = !r.lease;
+  f.release.title = r.lease ? `End ${r.lease.profile} (${r.lease.holder}) and return to ${r.default_profile}` : "";
+  f.fault.hidden = !r.fault;  // only while TX is inhibited
+  if (r.fault) f.fault.textContent = `FAULT — TX inhibited: ${r.fault.reason}`;
+}
+
 function updateCard(id, r, mock) {
   let card = cards.get(id);
   if (card && card.sig !== undefined && card.sig !== profileSig(r)) {
@@ -184,14 +243,7 @@ function updateCard(id, r, mock) {
   f.smeter.style.setProperty("--full", `${10000 / Math.max(1, meterPct(t.strength))}%`);
   f.sval.textContent = live ? sUnits(t.strength) : "—";
 
-  let profText = r.applied_profile || "—";
-  if (r.target_profile && r.target_profile !== r.applied_profile) profText += ` → ${r.target_profile}`;
-  const plan = r.lease && r.lease.plan && r.lease.plan.length ? r.lease.plan : null;
-  if (plan) {
-    const step = plan[r.lease.attempt];
-    profText += ` via ${step.label} (${r.lease.attempt + 1}/${plan.length})`;
-  }
-  f.profile.textContent = profText;
+  f.profile.textContent = profileText(r);
   if (r.applied_freq && live && t.freq !== r.applied_freq) f.freq.title = `verified ${fmtFreq(r.applied_freq)}`;
   f.power.textContent = prof && prof.power != null
     ? (prof.power_level ? `${prof.power_level} · ` : "") + `${Math.round(prof.power * 100)}%` : "—";
@@ -267,7 +319,7 @@ function render() {
   $("#mode").className = "pill " + (status.mock ? "warn" : "ok");
   $("#txmode").textContent = status.allow_tx ? "allow-tx" : "TX disabled";
   $("#txmode").className = "pill " + (status.allow_tx ? "ok" : "warn");
-  for (const [id, r] of Object.entries(status.radios)) updateCard(id, r, status.mock);
+  for (const [id, r] of Object.entries(status.radios)) { updateCard(id, r, status.mock); updateBanner(id, r); }
   if (window.onStatus) window.onStatus(status);
   winlinkHelpState(status);
   const sched = $("#schedule");
