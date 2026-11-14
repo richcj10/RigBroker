@@ -399,7 +399,8 @@ class BbsService:
         # 3. relay until the link or the lease ends
         while True:
             if not self._lease_alive(s):
-                return "the radio session ended (Release pressed, time limit, or taken by another user)"
+                return ("the radio session ended (Release pressed, time limit, "
+                        "or taken by another user)")
             timeout = 1.0
             if s.state == "connecting":
                 left = connect_by - time.monotonic()
