@@ -77,6 +77,49 @@
     if (s.speed_kmh || ">kj[<vbsuOR".includes(code)) return "#e07a1f"; // moving
     return "#2f9e62";
   }
+  // ------------------------------------------------------------ weather
+  // The broker sends weather in fixed units (°C, m/s, mm, hPa); shown in US units like aprs.fi.
+  const degF = (c) => c * 9 / 5 + 32, mph = (ms) => ms / 0.44704, inch = (mm) => mm / 25.4;
+  function wxLines(w) {
+    const out = [], a = [];
+    if (w.temperature != null) a.push(`Temperature ${degF(w.temperature).toFixed(0)}°F`);
+    if (w.humidity != null) a.push(`Humidity ${Math.round(w.humidity)}%`);
+    if (w.pressure != null) a.push(`Pressure ${Math.round(w.pressure)} mbar`);
+    if (a.length) out.push(a.join(" · "));
+    if (w.wind_speed != null || w.wind_gust != null) {
+      let t = "Wind";
+      if (w.wind_direction != null) t += ` ${Math.round(w.wind_direction)}° ${card(w.wind_direction)}`;
+      if (w.wind_speed != null) t += ` ${mph(w.wind_speed).toFixed(1)} mph`;
+      if (w.wind_gust != null) t += ` (gusts ${mph(w.wind_gust).toFixed(1)} mph)`;
+      out.push(t);
+    }
+    const rain = [["rain_1h", "/1h"], ["rain_24h", "/24h"], ["rain_since_midnight", " since midnight"]]
+      .filter(([k]) => w[k] != null).map(([k, l]) => `${inch(w[k]).toFixed(2)} in${l}`);
+    if (rain.length) out.push("Rain " + rain.join(" · "));
+    if (w.luminosity != null) out.push(`Luminosity ${Math.round(w.luminosity)} W/m²`);
+    return out;
+  }
+  function wxShort(w) {
+    const p = [];
+    if (w.temperature != null) p.push(`${degF(w.temperature).toFixed(0)}°F`);
+    if (w.humidity != null) p.push(`${Math.round(w.humidity)}%`);
+    if (w.wind_speed != null) p.push(`${w.wind_direction != null ? Math.round(w.wind_direction) + "° " : ""}${mph(w.wind_speed).toFixed(0)} mph`
+      + (w.wind_gust != null ? ` g${mph(w.wind_gust).toFixed(0)}` : ""));
+    if (w.pressure != null) p.push(`${Math.round(w.pressure)} mbar`);
+    return p.join(" · ") || "weather";
+  }
+  // hover text (plain-text title tooltip): header + the full report
+  const wxTitle = (head, w) => [head, ...wxLines(w)].join("\n");
+
+  function tipNode(s) {  // map hover: callsign, plus the weather report for WX stations
+    const d = el("div", s.weather ? "wx-tip" : null);
+    d.append(el("b", null, s.call));
+    if (s.weather) {
+      for (const t of wxLines(s.weather)) d.append(el("div", null, t));
+      if (s.wx_heard) d.append(el("div", "sub", `Report ${ago(s.wx_heard)}`));
+    }
+    return d;
+  }
   function stationNode(s) {
     const d = el("div");
     const b = el("b", null, s.call);
@@ -85,11 +128,8 @@
     if (s.comment) lines.push(s.comment);
     if (s.status) lines.push(`Status: ${s.status}`);
     if (s.distance_km != null) lines.push(`${s.distance_km.toFixed(1)} km ${card(s.bearing)} (${Math.round(s.bearing)}°)`);
-    if (s.speed_kmh) lines.push(`${Math.round(s.speed_kmh)} km/h, course ${s.course ?? "?"}°`);
-    if (s.weather) {
-      const w = s.weather;
-      lines.push(`WX: ${w.temperature != null ? w.temperature.toFixed(1) + " °C" : ""} ${w.humidity != null ? w.humidity + "% RH" : ""} ${w.wind_speed != null ? "wind " + w.wind_speed.toFixed(1) + " m/s" : ""}`.trim());
-    }
+    if (s.speed_kmh && !s.weather) lines.push(`${Math.round(s.speed_kmh)} km/h, course ${s.course ?? "?"}°`);
+    if (s.weather) lines.push(...wxLines(s.weather), `Weather report ${ago(s.wx_heard)}`);
     lines.push(`Heard ${ago(s.last_heard)} via ${s.via} · ${s.packets} pkts`);
     for (const t of lines) d.append(el("div", null, t));
     const a = el("a", null, "aprs.fi ↗");
@@ -103,7 +143,8 @@
     const color = kindColor(s);
     if (!m) {
       m = L.circleMarker([s.lat, s.lon], { radius: 7, weight: 2, color, fillColor: color, fillOpacity: 0.65 }).addTo(layer);
-      m.bindTooltip(el("span", null, s.call), { direction: "top", offset: [0, -6] });
+      // content is rebuilt on every hover, so a WX station always shows its latest report
+      m.bindTooltip(() => tipNode(S.stations.get(s.call) || s), { direction: "top", offset: [0, -6] });
       m.bindPopup(() => stationNode(S.stations.get(s.call) || s));
       markers.set(s.call, m);
     } else {
@@ -154,7 +195,11 @@
         el("td", "sub", ago(s.last_heard)),
         el("td", null, s.via),
         el("td", "num", String(s.packets)),
-        el("td", "sub", s.weather ? "weather" : (s.status || s.comment || "")));
+        el("td", "sub", s.weather ? wxShort(s.weather) : (s.status || s.comment || "")));
+      if (s.weather) {
+        tr.className = "has-wx";
+        tr.title = wxTitle(`${s.call} weather (${ago(s.wx_heard)})`, s.weather);
+      }
       frag.append(tr);
     }
     $("#heard").replaceChildren(frag);
@@ -169,6 +214,10 @@
       const tr = el("tr", p.dir === "tx" ? "warning" : "");
       tr.append(el("td", null, fmtTime(p.ts)), el("td", null, p.dir.toUpperCase()), el("td", null, p.src), el("td", null, `${p.fmt}: ${p.summary}`));
       tr.title = p.raw;
+      if (p.wx) {
+        tr.classList.add("has-wx");
+        tr.title = wxTitle(`${p.src} weather`, p.wx) + "\n\n" + p.raw;
+      }
       frag.append(tr);
     }
     $("#pkts").replaceChildren(frag);

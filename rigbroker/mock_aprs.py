@@ -10,6 +10,7 @@ import asyncio
 import math
 import random
 import re
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -95,6 +96,11 @@ class MockAprsLink:
                     f"Hello from MOCK7, 73 ({tick}){{{tick % 1000}")
         if tick % 40 == 0:
             return "MOCK4-10>APRS::BLN1     :Club net tonight 8pm on the repeater"
+        if tick % 15 == 0:  # positionless weather report (Davis Vantage Pro style), no map dot
+            return (f"MOCK8>APRS,WIDE2-1:_{time.strftime('%m%d%H%M', time.gmtime())}"
+                    f"c{r.randint(0, 359):03d}s{r.randint(0, 9):03d}g{r.randint(5, 20):03d}"
+                    f"t{r.randint(20, 40):03d}r000p000P000h{r.randint(80, 99):02d}"
+                    f"b{r.randint(10000, 10150):05d}.DsVP")
         f = r.choice(self.fakes)
         if f.speed:
             f.heading = (f.heading + r.uniform(-20, 20)) % 360

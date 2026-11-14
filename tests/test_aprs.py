@@ -10,7 +10,15 @@ import pytest
 from fastapi.testclient import TestClient
 
 from rigbroker.api import create_app
-from rigbroker.aprs import AprsError, AprsService, bearing_distance, validate_text
+from rigbroker.aprs import (
+    MPH,
+    AprsError,
+    AprsService,
+    bearing_distance,
+    normalize_weather,
+    validate_text,
+    weather_text,
+)
 from rigbroker.broker import Broker
 from rigbroker.events import EventLog
 from rigbroker.kiss import FrameHandler, LinkDown
@@ -87,6 +95,55 @@ async def test_station_tracking_and_rx_gate(svc: tuple[AprsService, FakeLink, Ga
     g.rx = True
     await s.on_frame("garbage without format")
     assert s.packets[-1].fmt == "unparsed"
+
+
+async def test_positionless_weather(svc: tuple[AprsService, FakeLink, Gates]) -> None:
+    s, _, _ = svc
+    await s.on_frame("W4WX>APRS,WIDE2-1:_11141201c190s005g015t027r000p000P000h94b10090.DsVP")
+    st = s.stations["W4WX"]
+    w = st.weather
+    assert w is not None and st.wx_heard and st.comment == ".DsVP" and st.lat is None
+    assert w["wind_direction"] == 190 and abs(w["wind_speed"] / MPH - 5) < 0.01
+    assert abs(w["wind_gust"] / MPH - 15) < 0.01 and abs(w["temperature"] * 9 / 5 + 32 - 27) < 0.01
+    assert w["humidity"] == 94 and w["pressure"] == 1009 and w["rain_1h"] == 0
+    rec = s.packets[-1]
+    assert rec.wx == w
+    assert rec.summary == "weather: 27°F, 94%, wind 190° 5 mph g15, 1009 mbar"
+
+
+async def test_position_weather_wind_from_course_speed(
+        svc: tuple[AprsService, FakeLink, Gates]) -> None:
+    # aprslib: wind is in course/speed (speed converted as knots, APRS says mph) and the
+    # snowfall field "s" is read as wind speed - normalize_weather undoes both
+    s, _, _ = svc
+    await s.on_frame("W4WX-1>APRS:!3800.00N/08600.00W_190/005g015t027r001p012P005h94b10090s001")
+    st = s.stations["W4WX-1"]
+    w = st.weather
+    assert w is not None and st.lat == 38.0 and st.symbol == "/_"
+    assert w["wind_direction"] == 190 and abs(w["wind_speed"] / MPH - 5) < 0.01
+    assert abs(w["rain_1h"] / 25.4 - 0.01) < 1e-6 and abs(w["rain_24h"] / 25.4 - 0.12) < 1e-6
+    assert "wind 190° 5 mph g15" in s.packets[-1].summary
+
+
+@pytest.mark.parametrize(("wind", "direction", "mph"), [
+    ("041/000", 41, 0),        # calm: aprslib drops speed 0
+    ("000/000", None, 0),      # calm, no direction
+    (".../...", None, None),   # no wind sensor
+    ("360/012", 0, 12),
+])
+def test_position_weather_wind_edge_cases(wind: str, direction: int | None,
+                                          mph: int | None) -> None:
+    import aprslib
+    p = aprslib.parse(f"N0>APRS:!3700.00N/08600.00W_{wind}g012t081r000p000P000h71b10150")
+    w = normalize_weather(p)
+    assert w is not None and w.get("wind_direction") == direction
+    assert (None if "wind_speed" not in w else round(w["wind_speed"] / MPH)) == mph
+
+
+def test_normalize_weather_ignores_non_weather() -> None:
+    assert normalize_weather({"format": "uncompressed", "latitude": 1.0}) is None
+    assert normalize_weather({"weather": {"humidity": True, "x": 1}}) is None
+    assert weather_text({"pressure": 1013.2}) == "1013 mbar"
 
 
 async def test_incoming_message_is_acked_once_stored_once(

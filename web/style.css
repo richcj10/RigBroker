@@ -362,3 +362,8 @@ details[open] > summary::before { content: "▾ "; }
 .pwr-label { font-size: 13px; color: var(--muted); }
 .pwr-btns { display: inline-flex; gap: 6px; }
 .pwr-btns button.on { border-color: var(--info); box-shadow: inset 0 0 0 1px var(--info); font-weight: 600; }
+
+/* APRS weather: hovering a WX row (Heard / Packets) shows the full report */
+tr.has-wx { cursor: help; }
+tr.has-wx td:last-child { color: #2f7bd9; }
+.leaflet-tooltip .wx-tip { text-align: left; line-height: 1.45; }

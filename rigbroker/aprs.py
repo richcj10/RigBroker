@@ -13,6 +13,7 @@ import contextlib
 import itertools
 import math
 import random
+import re
 import time
 import uuid
 from collections import deque
@@ -28,6 +29,64 @@ from .kiss import AprsLink, LinkDown
 
 MAX_TEXT = 67
 _BAD_TEXT = set("|~{")
+
+MPH = 0.44704   # m/s per mph
+KNOT_KMH = 1.852
+# weather fields kept (aprslib names and units: °C, m/s, mm, hPa, %, W/m²)
+_WX_KEYS = ("temperature", "humidity", "pressure", "wind_direction", "wind_speed", "wind_gust",
+            "rain_1h", "rain_24h", "rain_since_midnight", "luminosity")
+
+
+def normalize_weather(p: dict[str, Any]) -> dict[str, float] | None:
+    """A received packet's weather in fixed units (°C, m/s, mm, hPa), or None.
+
+    aprslib leaves the wind of a *position* weather report ("_ddd/sss" after the position)
+    in course/speed, converts that speed as if it were knots (APRS weather speed is mph),
+    and reads the snowfall field ("s") as wind speed. Positionless ("_" format) reports
+    are already right.
+    """
+    w = p.get("weather")
+    if not isinstance(w, dict):
+        return None
+    out = {k: float(w[k]) for k in _WX_KEYS
+           if isinstance(w.get(k), int | float) and not isinstance(w.get(k), bool)}
+    if "latitude" in p:
+        out.pop("wind_speed", None)
+        m = _POS_WIND.search(str(p.get("raw", "")))
+        if m:  # read "ddd/sss" ourselves: aprslib drops 0 for both (calm wind = no speed)
+            d, s = m.groups()
+            if s.isdigit():
+                out["wind_speed"] = int(s) * MPH
+            if d.isdigit() and not (d == "000" and s in ("000", "...", "   ")):
+                out["wind_direction"] = float(int(d) % 360)
+        else:  # compressed position: only aprslib's course/speed are available
+            if isinstance(p.get("course"), int | float):
+                out["wind_direction"] = float(p["course"])
+            if isinstance(p.get("speed"), int | float):
+                out["wind_speed"] = float(p["speed"]) / KNOT_KMH * MPH
+    return out or None
+
+
+# wind of an uncompressed position weather report: longitude, "_" symbol, then ddd/sss
+_POS_WIND = re.compile(r"\d{5}\.\d\d[EW]_(\d{3}|\.{3}| {3})/(\d{3}|\.{3}| {3})")
+
+
+def weather_text(w: dict[str, float]) -> str:
+    """One-line summary in US units, e.g. '27°F, 94%, wind 190° 5 mph g15, 1009 mbar'."""
+    parts = []
+    if "temperature" in w:
+        parts.append(f"{w['temperature'] * 9 / 5 + 32:.0f}°F")
+    if "humidity" in w:
+        parts.append(f"{w['humidity']:.0f}%")
+    if "wind_speed" in w:
+        d = f"{w['wind_direction']:.0f}° " if "wind_direction" in w else ""
+        g = f" g{w['wind_gust'] / MPH:.0f}" if "wind_gust" in w else ""
+        parts.append(f"wind {d}{w['wind_speed'] / MPH:.0f} mph{g}")
+    if "pressure" in w:
+        parts.append(f"{w['pressure']:.0f} mbar")
+    if w.get("rain_1h"):
+        parts.append(f"rain {w['rain_1h'] / 25.4:.2f} in/1h")
+    return ", ".join(parts)
 
 
 class AprsError(Exception):
@@ -48,7 +107,8 @@ class Station:
     speed_kmh: float | None = None
     course: int | None = None
     altitude_m: float | None = None
-    weather: dict[str, Any] | None = None
+    weather: dict[str, float] | None = None  # normalize_weather() units
+    wx_heard: float | None = None  # when the last weather report arrived
     distance_km: float | None = None
     bearing: float | None = None
 
@@ -76,6 +136,7 @@ class PacketRec:
     fmt: str
     src: str
     summary: str
+    wx: dict[str, float] | None = None  # weather carried by this packet (for the hover)
 
 
 def bearing_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> tuple[float, float]:
@@ -182,10 +243,12 @@ class AprsService:
                              f"{pkt.get('message_text', '')}")
             self._push("bulletin", self.bulletins[key])
             return
-        st = self._update_station(src, pkt)
-        self._log_packet("rx", raw, fmt, src, self._summary(pkt, st))
+        wx = normalize_weather(pkt)
+        st = self._update_station(src, pkt, wx)
+        self._log_packet("rx", raw, fmt, src, self._summary(pkt, st, wx), wx=wx)
 
-    def _update_station(self, src: str, p: dict[str, Any]) -> Station:
+    def _update_station(self, src: str, p: dict[str, Any],
+                        wx: dict[str, float] | None = None) -> Station:
         st = self.stations.get(src) or Station(call=src)
         st.last_heard, st.packets = time.time(), st.packets + 1
         path = [str(x) for x in p.get("path", [])]
@@ -201,8 +264,10 @@ class AprsService:
             st.altitude_m = p.get("altitude")
         if p.get("status"):
             st.status = str(p["status"])[:80]
-        if p.get("weather"):
-            st.weather = dict(p["weather"])
+        if wx:
+            st.weather, st.wx_heard = wx, time.time()
+            if p.get("format") == "wx" and p.get("comment"):  # positionless: e.g. ".DsVP"
+                st.comment = str(p["comment"])[:80]
         me = self.position()
         if me and st.lat is not None and st.lon is not None:
             st.distance_km, st.bearing = bearing_distance(me[0], me[1], st.lat, st.lon)
@@ -211,23 +276,12 @@ class AprsService:
         return st
 
     @staticmethod
-    def _summary(p: dict[str, Any], st: Station) -> str:
+    def _summary(p: dict[str, Any], st: Station, wx: dict[str, float] | None = None) -> str:
         fmt = p.get("format")
         if fmt == "status":
             return f"status: {p.get('status', '')}"
-        if st.weather and p.get("weather"):
-            w = p["weather"]
-            parts = []
-            if w.get("temperature") is not None:
-                parts.append(f"{w['temperature']:.1f} C")
-            if w.get("humidity") is not None:
-                parts.append(f"{w['humidity']}% RH")
-            wind = w.get("wind_speed", p.get("speed"))  # WX "course/speed" = wind dir/speed
-            if wind is not None:
-                parts.append(f"wind {float(wind):.0f} km/h from {p.get('course', '?')}")
-            if w.get("pressure") is not None:
-                parts.append(f"{w['pressure']:.0f} hPa")
-            return "weather: " + ", ".join(parts)
+        if wx:
+            return "weather: " + weather_text(wx)
         if "latitude" in p:
             extra = f" {st.distance_km:.1f} km" if st.distance_km is not None else ""
             return f"position {p['latitude']:.4f},{p['longitude']:.4f}{extra} {st.comment}"
@@ -353,8 +407,9 @@ class AprsService:
 
     # ---------------------------------------------------------------- views
 
-    def _log_packet(self, d: str, raw: str, fmt: str, src: str, summary: str) -> None:
-        rec = PacketRec(time.time(), d, raw, fmt, src, summary)
+    def _log_packet(self, d: str, raw: str, fmt: str, src: str, summary: str,
+                    wx: dict[str, float] | None = None) -> None:
+        rec = PacketRec(time.time(), d, raw, fmt, src, summary, wx)
         self.packets.append(rec)
         self._push("packet", asdict(rec))
 
