@@ -7,7 +7,7 @@ set -eu
 RB=/var/lib/rigbroker
 RUN=/run/rigbroker-setup
 as_rb() { sudo -u rigbroker env HOME="$RB" WINEPREFIX="$RB/vara/prefix" WINEDEBUG=-all \
-  BOX64_LOG=0 BOX64_NOBANNER=1 "WINEDLLOVERRIDES=mscoree=;mshtml=" DISPLAY=:51 "$@"; }
+  BOX64_LOG=0 BOX64_NOBANNER=1 BOX64_DYNAREC_SAFEFLAGS=2 "WINEDLLOVERRIDES=mscoree=;mshtml=" DISPLAY=:51 "$@"; }
 
 stop() {
   # ask VARA to close like clicking X, so it saves its settings; then force what's left

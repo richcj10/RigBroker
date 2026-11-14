@@ -16,6 +16,9 @@ SupplementaryGroups=audio
 Environment=HOME=/var/lib/rigbroker
 Environment=WINEPREFIX=/var/lib/rigbroker/vara/prefix
 Environment=WINEDEBUG=-all BOX64_LOG=0 BOX64_NOBANNER=1
+# Required: with box64's default flag optimisation VARA rejects every MYCALL ("WRONG"),
+# so Winlink Express can never connect. SAFEFLAGS=1 is not enough (tested 2026-11-14).
+Environment=BOX64_DYNAREC_SAFEFLAGS=2
 Environment="WINEDLLOVERRIDES=mscoree=;mshtml="
 ExecStart=/usr/bin/xvfb-run -a -s "-screen 0 1280x900x24 -nolisten tcp" /usr/bin/box64 /opt/vara/wine/bin/wine "C:\\VARA FM\\VARAFM.exe"
 # VARA ignores SIGTERM; ask Wine itself to end every process in the prefix first (fast),
