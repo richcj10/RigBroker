@@ -453,8 +453,8 @@ class BbsService:
 
 # ---------------------------------------------------------------- mock BBS (UI work, tests)
 
-BANNER = ("[KT7RUN-7 MOCK BBS]\rHello {you}, welcome.\r"
-          "Commands: L (list), R n (read), B (bye)\rKT7RUN-7> ")
+BANNER = ("[N0CALL-7 MOCK BBS]\rHello {you}, welcome.\r"
+          "Commands: L (list), R n (read), B (bye)\rN0CALL-7> ")
 MSGS = [("1", "ALL", "Net tonight 8pm on the repeater"),
         ("2", "KY4WL", "Welcome to the BBS"),
         ("3", "ALL", "Packet field day this weekend")]
@@ -519,16 +519,16 @@ class MockAgwServer:
         c = cmd.upper()
         if c == "L":
             rows = "".join(f"{n:>3}  {to:<6} {subj}\r" for n, to, subj in MSGS)
-            await send("D", f"Msg# To     Subject\r{rows}KT7RUN-7> ")
+            await send("D", f"Msg# To     Subject\r{rows}N0CALL-7> ")
         elif c.startswith("R "):
             m = next((x for x in MSGS if x[0] == c[2:].strip()), None)
             await send("D", (f"Msg {m[0]} to {m[1]}: {m[2]}\r" if m else "No such message\r")
-                       + "KT7RUN-7> ")
+                       + "N0CALL-7> ")
         elif c in ("B", "BYE"):
             await send("D", "73!\r")
-            await send("d", "*** DISCONNECTED From Station KT7RUN-7\r")
+            await send("d", "*** DISCONNECTED From Station N0CALL-7\r")
         else:
-            await send("D", f"? {cmd}\rKT7RUN-7> ")
+            await send("D", f"? {cmd}\rN0CALL-7> ")
 
 
 __all__ = ["AgwConn", "AgwDecoder", "AgwFrame", "BbsError", "BbsService", "BbsStore",

@@ -130,7 +130,7 @@ class Message:
     id: str = field(default_factory=lambda: uuid.uuid4().hex[:10])
     path: list[str] = field(default_factory=list)  # first try ([] = direct)
     retry_path: list[str] = field(default_factory=list)  # later tries
-    route: str = ""  # human-readable, e.g. "via W7MOT-6"
+    route: str = ""  # human-readable, e.g. "via N0DIGI-6"
 
 
 @dataclass

@@ -53,7 +53,7 @@ radios:
                     max_minutes: 10080, transmits: false}
       # Packet BBS terminal in the web UI (Packet tab): tuned to the chosen BBS's frequency;
       # Direwolf does the AX.25 connection over its AGW port (127.0.0.1:8000, Pi-local).
-      packet_bbs:  {freq: 145710000, mode: FM, power: 0.5, squelch: 0.30, volume: 0.12, service: direwolf@pkt,
+      packet_bbs:  {freq: 145010000, mode: FM, power: 0.5, squelch: 0.30, volume: 0.12, service: direwolf@pkt,
                     freq_ranges: [[144000000, 148000000], [420000000, 450000000]],
                     max_minutes: 60, transmits: true}
       # No "off" profile: Hamlib's ID-4100 driver can't power the radio off over CI-V
@@ -130,7 +130,7 @@ bbs:
   agw: 127.0.0.1:8000           # Direwolf AGW of direwolf@pkt (never reachable from the LAN)
   state_file: ~/.local/state/rigbroker/bbs.json   # BBSes added in the web UI
   stations:
-    - {call: KT7RUN-7, freq: 145710000, name: "KT7RUN BBS (Phoenix)", via: [W7MOT-6]}
+    - {call: N0CALL-7, freq: 145010000, name: "Example BBS", via: [N0DIGI-6]}
 
 # Airband tab: named channels shown above the full 25 kHz grid. Add your local airports here or
 # in the web UI (saved to state_file). Example only - list the airports near your station.

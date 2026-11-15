@@ -28,19 +28,19 @@ from tests.test_api import poll, state_is
 
 
 def test_agw_frame_roundtrip_and_partial_feed() -> None:
-    fr = AgwFrame("D", "KY4WL", "KT7RUN-7", b"L\r", pid=0xF0)
+    fr = AgwFrame("D", "KY4WL", "N0CALL-7", b"L\r", pid=0xF0)
     raw = fr.encode()
     assert len(raw) == HDR_LEN + 2 and raw[4:5] == b"D" and raw[6] == 0xF0
     dec = AgwDecoder()
     assert dec.feed(raw[:10]) == []  # header split across reads
-    out = dec.feed(raw[10:] + AgwFrame("d", "KT7RUN-7", "KY4WL").encode())
+    out = dec.feed(raw[10:] + AgwFrame("d", "N0CALL-7", "KY4WL").encode())
     assert [(f.kind, f.call_from, f.call_to, f.data) for f in out] == [
-        ("D", "KY4WL", "KT7RUN-7", b"L\r"), ("d", "KT7RUN-7", "KY4WL", b"")]
+        ("D", "KY4WL", "N0CALL-7", b"L\r"), ("d", "N0CALL-7", "KY4WL", b"")]
 
 
 def test_via_data() -> None:
-    d = via_data(["W7MOT-6"])
-    assert d[0] == 1 and d[1:11] == b"W7MOT-6\0\0\0" and len(d) == 11
+    d = via_data(["N0DIGI-6"])
+    assert d[0] == 1 and d[1:11] == b"N0DIGI-6\0\0" and len(d) == 11
 
 
 def test_clean_rx_and_tx() -> None:
@@ -98,22 +98,22 @@ def test_snapshot_lists_configured_bbs(client: tuple[TestClient, Broker]) -> Non
     c, _ = client
     st = c.get("/bbs").json()
     assert st["state"] == "idle" and st["mycall"] == "KY4WL"
-    assert st["stations"][0]["call"] == "KT7RUN-7" and st["stations"][0]["via"] == ["W7MOT-6"]
+    assert st["stations"][0]["call"] == "N0CALL-7" and st["stations"][0]["via"] == ["N0DIGI-6"]
     assert c.get("/status").json()["bbs"]["state"] == "idle"
 
 
 def test_direct_session_send_and_disconnect(client: tuple[TestClient, Broker]) -> None:
     c, broker = client
-    r = c.post("/bbs/connect", json={"call": "kt7run-7"})
+    r = c.post("/bbs/connect", json={"call": "n0call-7"})
     assert r.status_code == 200, r.json()
     st = bbs_poll(c, lambda s: s["state"] == "connected")
     assert "Hello KY4WL" in text_of(st) and st["session"]["holder"] == "admin"
     radio = c.get("/radios/vu").json()
-    assert radio["applied_freq"] == 145_710_000 and radio["consumer"] == "direwolf@pkt"
+    assert radio["applied_freq"] == 145_010_000 and radio["consumer"] == "direwolf@pkt"
     agw = broker._mock_agw
     assert agw is not None
     assert [f.kind for f in agw.received][:2] == ["X", "C"]
-    assert agw.received[1].call_from == "KY4WL" and agw.received[1].call_to == "KT7RUN-7"
+    assert agw.received[1].call_from == "KY4WL" and agw.received[1].call_to == "N0CALL-7"
 
     assert c.post("/bbs/send", json={"text": "L"}).status_code == 200
     st = bbs_poll(c, lambda s: "Msg#" in text_of(s))
@@ -122,26 +122,26 @@ def test_direct_session_send_and_disconnect(client: tuple[TestClient, Broker]) -
 
     assert c.post("/bbs/disconnect").status_code == 200
     st = bbs_poll(c, lambda s: s["state"] == "idle")
-    assert agw.received[-1].kind == "d" and st["last"]["call"] == "KT7RUN-7"
+    assert agw.received[-1].kind == "d" and st["last"]["call"] == "N0CALL-7"
     poll(c, state_is("default"))  # radio given back (APRS)
 
 
 def test_via_digipeater(client: tuple[TestClient, Broker]) -> None:
     c, broker = client
-    r = c.post("/bbs/connect", json={"call": "KT7RUN-7", "via": ["w7mot-6"]})
-    assert r.status_code == 200 and r.json()["session"]["via"] == ["W7MOT-6"]
+    r = c.post("/bbs/connect", json={"call": "N0CALL-7", "via": ["n0digi-6"]})
+    assert r.status_code == 200 and r.json()["session"]["via"] == ["N0DIGI-6"]
     bbs_poll(c, lambda s: s["state"] == "connected")
     agw = broker._mock_agw
     assert agw is not None
     v = next(f for f in agw.received if f.kind == "v")
-    assert v.call_to == "KT7RUN-7" and v.data == via_data(["W7MOT-6"])
+    assert v.call_to == "N0CALL-7" and v.data == via_data(["N0DIGI-6"])
     c.post("/bbs/disconnect")
     bbs_poll(c, lambda s: s["state"] == "idle")
 
 
 def test_remote_bye_returns_the_radio(client: tuple[TestClient, Broker]) -> None:
     c, _ = client
-    c.post("/bbs/connect", json={"call": "KT7RUN-7"})
+    c.post("/bbs/connect", json={"call": "N0CALL-7"})
     bbs_poll(c, lambda s: s["state"] == "connected")
     c.post("/bbs/send", json={"text": "B"})
     st = bbs_poll(c, lambda s: s["state"] == "idle")
@@ -153,7 +153,7 @@ def test_bbs_that_never_answers(client: tuple[TestClient, Broker]) -> None:
     c, broker = client
     assert broker._mock_agw is not None
     broker._mock_agw.answer = False  # Direwolf gives up (RETRYOUT)
-    c.post("/bbs/connect", json={"call": "KT7RUN-7"})
+    c.post("/bbs/connect", json={"call": "N0CALL-7"})
     st = bbs_poll(c, lambda s: s["state"] == "idle" and s["last"] is not None)
     assert "did not answer" in st["last"]["reason"]
     poll(c, state_is("default"))
@@ -163,12 +163,12 @@ def test_refusals(client: tuple[TestClient, Broker]) -> None:
     c, _ = client
     assert c.post("/bbs/connect", json={"call": "N0PE-1"}).status_code == 409  # unknown
     assert c.post("/bbs/connect", json={"call": "bad;id"}).status_code == 422
-    assert c.post("/bbs/connect", json={"call": "KT7RUN-7", "via": ["x y"]}).status_code == 422
+    assert c.post("/bbs/connect", json={"call": "N0CALL-7", "via": ["x y"]}).status_code == 422
     r = c.post("/bbs/send", json={"text": "L"})
     assert r.status_code == 409 and "not connected" in r.json()["reason"]
     assert c.post("/bbs/disconnect").status_code == 409
-    c.post("/bbs/connect", json={"call": "KT7RUN-7"})
-    r = c.post("/bbs/connect", json={"call": "KT7RUN-7"})
+    c.post("/bbs/connect", json={"call": "N0CALL-7"})
+    r = c.post("/bbs/connect", json={"call": "N0CALL-7"})
     assert r.status_code == 409 and "already" in r.json()["reason"]
     bbs_poll(c, lambda s: s["state"] == "connected")
     r = c.post("/bbs/send", json={"text": "café"})
@@ -186,7 +186,7 @@ def test_station_list_admin(client: tuple[TestClient, Broker]) -> None:
     r = c.post("/bbs/stations", json={"call": "N7HF-1", "freq": 7101000})
     assert r.status_code == 422 and "outside" in r.json()["detail"]
     assert c.delete("/bbs/stations/N7XYZ-4").status_code == 200
-    assert c.delete("/bbs/stations/KT7RUN-7").status_code == 404  # config entries stay
+    assert c.delete("/bbs/stations/N0CALL-7").status_code == 404  # config entries stay
 
 
 def test_read_only_broker_refuses() -> None:
@@ -194,7 +194,7 @@ def test_read_only_broker_refuses() -> None:
     with TestClient(create_app(broker, auth_store=auth_store()),
                     headers={"X-RigBroker": "1"}) as c:
         assert c.post("/auth/login", json=LOGIN).status_code == 200
-        r = c.post("/bbs/connect", json={"call": "KT7RUN-7"})
+        r = c.post("/bbs/connect", json={"call": "N0CALL-7"})
         assert r.status_code == 409 and "read-only" in r.json()["reason"]
 
 
@@ -202,14 +202,14 @@ def test_login_required_to_connect() -> None:
     broker = Broker.build(make_config(), mock=True, allow_tx=True, simulate=False)
     with TestClient(create_app(broker, auth_store=auth_store()),
                     headers={"X-RigBroker": "1"}) as c:
-        assert c.post("/bbs/connect", json={"call": "KT7RUN-7"}).status_code == 401
+        assert c.post("/bbs/connect", json={"call": "N0CALL-7"}).status_code == 401
         assert c.get("/bbs").status_code == 200  # public view (config default)
 
 
 def test_ws_pushes_bbs_updates(client: tuple[TestClient, Broker]) -> None:
     c, _ = client
     with c.websocket_connect("/ws", headers={"origin": "http://testserver"}) as ws:
-        c.post("/bbs/connect", json={"call": "KT7RUN-7"})
+        c.post("/bbs/connect", json={"call": "N0CALL-7"})
         kinds = set()
         for _ in range(200):
             m = ws.receive_json()
@@ -233,7 +233,7 @@ async def test_mock_server_standalone() -> None:
     try:
         conn = await AgwConn.open("127.0.0.1", srv.port)
         await conn.send(AgwFrame("X", "KY4WL"))
-        await conn.send(AgwFrame("C", "KY4WL", "KT7RUN-7"))
+        await conn.send(AgwFrame("C", "KY4WL", "N0CALL-7"))
         kinds = [(await asyncio.wait_for(conn.recv(), 2)).kind for _ in range(3)]
         assert kinds == ["X", "C", "D"]
         await conn.close()

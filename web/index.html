@@ -220,16 +220,16 @@
         <label>BBS <select name="call" id="bbs-call"></select></label>
         <label>Path <select name="path" id="bbs-path"></select></label>
         <label class="grow" id="bbs-custom-wrap" hidden>Via (digipeaters, in order)
-          <input name="custom" placeholder="W7MOT-6" maxlength="80" autocomplete="off"></label>
+          <input name="custom" placeholder="N0DIGI-6" maxlength="80" autocomplete="off"></label>
         <button type="submit" id="bbs-connect">Connect</button>
         <button type="button" class="danger" id="bbs-disconnect" hidden>Disconnect</button>
         <button type="button" class="ghost small" id="bbs-add-toggle">+ Add BBS</button>
       </form>
       <form id="bbs-add" class="gw-form" hidden>
-        <label>Callsign <input name="call" required placeholder="KT7RUN-7" maxlength="11" autocomplete="off"></label>
-        <label>Freq (MHz) <input name="mhz" required type="number" step="0.0001" min="0.1" placeholder="145.710"></label>
-        <label class="grow">Name <input name="name" maxlength="80" placeholder="KT7RUN BBS (Phoenix)"></label>
-        <label class="grow">Digipeaters <input name="via" maxlength="80" placeholder="W7MOT-6 (optional, comma separated)"></label>
+        <label>Callsign <input name="call" required placeholder="N0CALL-7" maxlength="11" autocomplete="off"></label>
+        <label>Freq (MHz) <input name="mhz" required type="number" step="0.0001" min="0.1" placeholder="145.010"></label>
+        <label class="grow">Name <input name="name" maxlength="80" placeholder="Example BBS"></label>
+        <label class="grow">Digipeaters <input name="via" maxlength="80" placeholder="N0DIGI-6 (optional, comma separated)"></label>
         <button type="submit">Save</button>
       </form>
       <pre id="bbs-term" class="term" aria-live="polite" tabindex="0"></pre>

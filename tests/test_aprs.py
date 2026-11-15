@@ -322,8 +322,8 @@ def test_route_for_rules() -> None:
     assert r["path"] == wide and "not heard" in r["label"]
     r = route_for(Station("N7DIR"), wide)  # heard direct
     assert r["path"] == [] and r["retry_path"] == wide and r["label"].startswith("direct")
-    r = route_for(Station("N7DIG", via="W7MOT-6", via_path=["W7MOT-6"]), wide)
-    assert r["path"] == r["retry_path"] == ["W7MOT-6"] and r["label"] == "via W7MOT-6"
+    r = route_for(Station("N7DIG", via="N0DIGI-6", via_path=["N0DIGI-6"]), wide)
+    assert r["path"] == r["retry_path"] == ["N0DIGI-6"] and r["label"] == "via N0DIGI-6"
     r = route_for(Station("N7TWO", via="K7B-1", via_path=["K7A-2", "K7B-1"]), wide)
     assert r["path"] == ["K7B-1", "K7A-2"]  # nearest digipeater first on the way back
     r = route_for(Station("N7GEN", via="WIDE2", via_path=["WIDE2"]), wide)
@@ -345,12 +345,12 @@ async def test_dm_to_direct_station_goes_direct_then_wide(
 async def test_dm_to_digipeated_station_uses_that_digi(
         svc: tuple[AprsService, FakeLink, Gates]) -> None:
     s, link, _ = svc
-    await s.on_frame("N7DIG>APRS,W7MOT-6*,WIDE2-1:!3800.00N/08600.00W-")
+    await s.on_frame("N7DIG>APRS,N0DIGI-6*,WIDE2-1:!3800.00N/08600.00W-")
     m = await s.send_message("N7DIG", "hello")
-    assert link.sent[-1].startswith(f"{ME}>APZRBK,W7MOT-6::N7DIG")
+    assert link.sent[-1].startswith(f"{ME}>APZRBK,N0DIGI-6::N7DIG")
     await s._send_try(m)
-    assert link.sent[-1].startswith(f"{ME}>APZRBK,W7MOT-6::N7DIG")  # retries too
-    assert m.route == "via W7MOT-6"
+    assert link.sent[-1].startswith(f"{ME}>APZRBK,N0DIGI-6::N7DIG")  # retries too
+    assert m.route == "via N0DIGI-6"
 
 
 async def test_dm_to_unheard_station_uses_wide(svc: tuple[AprsService, FakeLink, Gates]) -> None:
