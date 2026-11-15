@@ -601,8 +601,8 @@ fillWinlinkHelp();
 // ---------------------------------------------------------------- views (tabs)
 // An element shows on every view it has a view-<name> class for (e.g. the radio card is on
 // Station, VARA FM and Packet); everything else with a view-* class is hidden.
-const VIEWS = ["station", "aprs", "vara", "packet", "hf"];
-const VIEW_TITLES = { aprs: "APRS", vara: "VARA FM", packet: "Packet", hf: "HF" };
+const VIEWS = ["station", "aprs", "vara", "packet", "airband", "hf"];
+const VIEW_TITLES = { aprs: "APRS", vara: "VARA FM", packet: "Packet", airband: "Airband", hf: "HF" };
 function showView() {
   let v = location.hash.replace("#", "");
   if (!VIEWS.includes(v) || (v === "aprs" && $("#nav-aprs").hidden && window.aprsKnown === false)) v = "station";

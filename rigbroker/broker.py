@@ -9,7 +9,10 @@ from pathlib import Path
 from typing import Any
 
 from . import __version__
+from .airband import AirbandChannels
 from .aprs import AprsService
+from .audio import SERVICE as AUDIO_SERVICE
+from .audio import AudioRelay, MockAudio
 from .bbs import BbsService, MockAgwServer
 from .config import Config, normalize_call
 from .direwolf import SERVICE_PREFIX, DirewolfManager
@@ -91,6 +94,19 @@ class Broker:
                         else KissTcpLink(a.kiss_host, a.kiss_port))
             self.aprs = AprsService(a, link, self.events, rx_gate=self.aprs_rx_gate,
                                     tx_gate=self.aprs_tx_gate, position=self.station_position)
+        self.airband: AirbandChannels | None = None
+        self.audio: AudioRelay | None = None
+        ab = config.airband
+        if ab is not None and ab.radio in self.radios:
+            if mock and ab.state_file:  # mock additions never touch the real list
+                ab = ab.model_copy(update={"state_file": ab.state_file + ".mock"})
+            aradio = self.radios[ab.radio]
+            self.airband = AirbandChannels(ab, aradio.cfg.profiles[ab.profile])
+            arig = self.rigs[ab.radio]
+            self.audio = AudioRelay(
+                ab.audio_socket, lambda: aradio.consumer == AUDIO_SERVICE,
+                source=MockAudio(lambda: bool(getattr(arig, "dcd", False))).open if mock
+                else None)
         self.bbs: BbsService | None = None
         self._mock_agw: MockAgwServer | None = None
         b = config.bbs
@@ -340,8 +356,12 @@ class Broker:
             await self.aprs.start()
         if self._mock_agw is not None:
             await self._mock_agw.start()
+        if self.audio is not None:
+            await self.audio.start()
 
     async def stop(self) -> None:
+        if self.audio is not None:
+            await self.audio.stop()
         if self.bbs is not None:
             await self.bbs.stop()
         if self._mock_agw is not None:
@@ -366,6 +386,8 @@ class Broker:
             "schedule": [],  # scheduler arrives in milestone 5
             "aprs": self.aprs.status() if self.aprs else None,
             "bbs": self.bbs.status() if self.bbs else None,
+            "audio": ({"connected": self.audio.connected, "listeners": self.audio.listeners}
+                      if self.audio else None),
             "gps": self.position_sync.status() if self.position_sync else None,
             "winlink": {"grid": self.config.winlink.grid,
                         "period": self.planner.day_or_night(),

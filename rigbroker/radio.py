@@ -178,6 +178,7 @@ class RadioController:
         self._swr_warned = False
         # samples taken before the broker itself retuned / tuned are stale for VFO following
         self._follow_after = 0.0
+        self.squelch: float | None = None  # last squelch set in a manual session
         self.unavailable: dict[str, str] = {}  # profile -> why it can't run right now
         self.position: Position | None = None  # from the radio's GPS (cfg.gps)
 
@@ -565,6 +566,7 @@ class RadioController:
             "applied_profile": self.applied,
             "applied_freq": self.applied_freq,
             "applied_mode": self.applied_mode,
+            "squelch": self.squelch,
             "tab": self.cfg.tab,
             "tune": self.cfg.tune.model_dump() if self.cfg.tune else None,
             "band_memory": self.band_memory.data,
@@ -652,6 +654,24 @@ class RadioController:
             self._follow_after = time.monotonic()
         self._emit("retune", f"tuned to {f / 1e6:.4f} MHz {m} by {by}")
         return True, f"{f / 1e6:.4f} MHz {m}"
+
+    async def set_squelch(self, level: float, *, by: str) -> tuple[bool, str]:
+        """Adjust squelch (0..1) during a manual session, read back."""
+        if not 0.0 <= level <= 1.0:
+            return False, "squelch must be 0..1"
+        async with self._lock:
+            if self.manual_profile() is None:
+                return False, "start a manual session first"
+            try:
+                await self.rig.set_level("SQL", level)
+                got = await self.rig.get_level("SQL")
+            except RigError as exc:
+                return False, f"rig error: {exc}"
+            self.squelch = got
+            if abs(got - level) > self.safety.level_tolerance:
+                return False, f"read-back mismatch: squelch {got:.2f}"
+        self._emit("squelch", f"squelch {round(level * 100)}% by {by}")
+        return True, f"squelch {round(got * 100)}%"
 
     async def tune_atu(self, *, by: str) -> tuple[bool, str]:
         """Send a short low-power carrier so an external auto-tuner can tune.
@@ -742,6 +762,10 @@ class RadioController:
                 if prof.manual:  # operator at the radio: follow the VFO, allow mic PTT
                     if sample.fresh and sample.started_mono >= self._follow_after:
                         self._follow_vfo(prof, sample)
+                    if sample.ptt and not prof.transmits:
+                        self._fire_locked(Ev.UNEXPECTED_TX, reason=(
+                            f"rig transmitting during receive-only profile {self.applied}"))
+                        return
                     if sample.ptt and not (prof.freq_allowed(sample.freq)
                                            and sample.mode in prof.modes):
                         self._fire_locked(Ev.UNEXPECTED_TX, reason=(
@@ -1058,6 +1082,7 @@ class RadioController:
             await self._step(4, "verify", self._verify(prof, freq))
             self.applied, self.applied_freq = target, freq
             self.applied_mode = prof.mode
+            self.squelch = prof.squelch
             self._drift_warned = False
             if prof.transmits:
                 await self._step(5, "clear_channel", self._wait_clear(is_default))

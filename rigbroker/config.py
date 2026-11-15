@@ -633,6 +633,34 @@ class BbsConfig(_Strict):
         return int(self.agw.rpartition(":")[2])
 
 
+class AirbandChannel(_Strict):
+    """A named airband channel (e.g. an airport tower), shown as a button."""
+
+    freq: int = Field(gt=0, description="Hz")
+    name: str = Field(max_length=60)
+    group: str = Field(default="", max_length=30, description="e.g. the airport, KPHX")
+
+    @field_validator("name", "group")
+    @classmethod
+    def _text(cls, v: str) -> str:
+        if not _TEXT_RE.match(v):
+            raise ValueError('printable ASCII without " \\ | ~ {')
+        return v.strip()
+
+
+class AirbandConfig(_Strict):
+    """Airband listening tab: receive-only AM, audio in the browser."""
+
+    radio: str = "vu"
+    profile: str = Field(default="airband", description="receive-only manual profile to lease")
+    step_hz: int = Field(default=25000, gt=0, description="channel grid spacing (US: 25 kHz)")
+    channels: list[AirbandChannel] = Field(default_factory=list)
+    state_file: str | None = Field(default="~/.local/state/rigbroker/airband.json",
+                                   description="channels added in the web UI; null = memory")
+    audio_socket: str = Field(default="/run/rigbroker-audio/rx.sock",
+                              description="raw 16 kHz mono S16LE from audio-stream.service")
+
+
 class SecurityConfig(_Strict):
     """Web/API access control (one shared station password + API tokens)."""
 
@@ -657,9 +685,30 @@ class Config(_Strict):
     security: SecurityConfig = Field(default_factory=SecurityConfig)
     aprs: AprsConfig | None = None
     bbs: BbsConfig | None = None
+    airband: AirbandConfig | None = None
     direwolf: DirewolfConfig = Field(default_factory=DirewolfConfig)
     power_file: str | None = Field(
         default=None, description="where TX power levels chosen in the web UI are saved")
+
+    @model_validator(mode="after")
+    def _airband(self) -> Config:
+        a = self.airband
+        if a is None:
+            return self
+        r = self.radios.get(a.radio)
+        if r is None or not r.enabled:
+            raise ValueError(f"airband.radio {a.radio!r} is not an enabled radio")
+        p = r.profiles.get(a.profile)
+        if p is None:
+            raise ValueError(f"airband.profile {a.profile!r} is not a profile of {a.radio!r}")
+        if not p.manual or p.transmits or p.service != "audio-stream":
+            raise ValueError(f"airband.profile {a.profile!r} must be manual, receive-only "
+                             "(transmits: false) and use service audio-stream")
+        for c in a.channels:
+            if not p.freq_allowed(c.freq):
+                raise ValueError(f"airband channel {c.name} {c.freq} Hz is outside "
+                                 f"{a.profile}'s freq_ranges")
+        return self
 
     @model_validator(mode="after")
     def _bbs(self) -> Config:

@@ -35,12 +35,13 @@ from pydantic import BaseModel, Field
 from starlette.requests import HTTPConnection
 
 from . import __version__
+from .airband import AirbandChannels, AirbandError
 from .aprs import AprsError, AprsService, validate_text
 from .auth import COOKIE, CSRF_HEADER, AuthError, AuthStore, LoginLimiter, Principal, Role, User
 from .bbs import MAX_LINE as MAX_BBS_LINE
 from .bbs import BbsError, BbsService
 from .broker import Broker
-from .config import BbsEntry, WinlinkMode, normalize_call
+from .config import AirbandChannel, BbsEntry, WinlinkMode, normalize_call
 from .direwolf import INSTANCES, SERVICE_PREFIX, DirewolfManager, SettingsError
 from .leases import Verdict
 from .radio import LeaseResult, RadioController
@@ -121,6 +122,16 @@ class PowerRequest(BaseModel):
 class TuneRequest(BaseModel):
     freq: int | None = Field(default=None, gt=0, description="Hz; omit to keep")
     mode: str | None = Field(default=None, max_length=10, description="omit to keep")
+
+
+class SquelchRequest(BaseModel):
+    level: float = Field(ge=0.0, le=1.0)
+
+
+class AirbandAddRequest(BaseModel):
+    freq: int = Field(gt=0)
+    name: str = Field(min_length=1, max_length=60)
+    group: str = Field(default="", max_length=30)
 
 
 class InjectRequest(BaseModel):
@@ -502,6 +513,40 @@ def create_app(broker: Broker, *, manage_lifecycle: bool = True,
         ok, msg = await radio(rid).retune(req.freq, req.mode, by=who.name)
         return JSONResponse({"ok": ok, "reason": msg}, status_code=200 if ok else 409)
 
+    @control.post("/radios/{rid}/squelch")
+    async def squelch(rid: str, req: SquelchRequest,
+                      who: Principal = Depends(require_control),  # noqa: B008
+    ) -> JSONResponse:
+        ok, msg = await radio(rid).set_squelch(req.level, by=who.name)
+        return JSONResponse({"ok": ok, "reason": msg}, status_code=200 if ok else 409)
+
+    # ---------------------------------------------------------------- airband
+
+    def airband() -> AirbandChannels:
+        if broker.airband is None:
+            raise HTTPException(404, "airband is not configured (add an airband: section)")
+        return broker.airband
+
+    @view.get("/airband")
+    async def airband_info() -> dict[str, Any]:
+        return airband().info()
+
+    @admin.post("/airband/channels")
+    async def airband_add(req: AirbandAddRequest) -> dict[str, Any]:
+        try:
+            ch = airband().add(AirbandChannel(**req.model_dump()))
+        except (ValueError, AirbandError) as exc:
+            raise HTTPException(422, str(exc).splitlines()[-1]) from None
+        return {"ok": True, "channel": ch.model_dump()}
+
+    @admin.delete("/airband/channels/{freq}")
+    async def airband_remove(freq: int) -> dict[str, Any]:
+        try:
+            airband().remove(freq)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc).strip("'\"")) from None
+        return {"ok": True}
+
     @control.post("/radios/{rid}/atu")
     async def atu(rid: str, who: Principal = Depends(require_control),  # noqa: B008
     ) -> JSONResponse:
@@ -695,6 +740,38 @@ def create_app(broker: Broker, *, manage_lifecycle: bool = True,
     async def direwolf_apply() -> dict[str, Any]:
         direwolf()
         return {"ok": True, **(await broker.apply_direwolf())}
+
+    @app.websocket("/ws/audio")
+    async def ws_audio(sock: WebSocket) -> None:
+        """Receive audio (16 kHz mono S16LE, binary frames). Login required, always."""
+        relay = broker.audio
+        if relay is None or not same_origin(sock) or identify(sock) is None:
+            broker.events.emit("audit", f"refused audio WebSocket from {client_ip(sock)}",
+                               level="warning")
+            await sock.close(code=1008)
+            return
+        await sock.accept()
+        q = relay.subscribe()
+        try:
+            async def drain() -> None:
+                while True:
+                    await sock.receive_text()  # raises on disconnect
+
+            async def pump() -> None:
+                while True:
+                    await sock.send_bytes(await q.get())
+
+            tasks = [asyncio.create_task(c()) for c in (drain, pump)]
+            try:
+                await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            finally:
+                for t in tasks:
+                    t.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+        except (WebSocketDisconnect, RuntimeError):
+            pass
+        finally:
+            relay.unsubscribe(q)
 
     @app.websocket("/ws")
     async def ws(sock: WebSocket) -> None:

@@ -1,14 +1,30 @@
-# /etc/systemd/system/audio-stream.service - PLACEHOLDER consumer for the "monitor"
-# profile (RX audio to the browser comes in a later milestone). Receive-only by design.
+# /etc/systemd/system/audio-stream.service - receive audio for the web UI (Airband tab and the
+# "monitor" profile). Started/stopped by RigBroker with those profiles. RECEIVE ONLY: it only
+# records from the Digirig's sound card; nothing here can key the radio.
+#
+# arecord captures 16 kHz mono S16LE and socat offers it on a Unix socket; the broker (which
+# runs with PrivateDevices and can't open the sound card itself) relays it to logged-in
+# browsers over /ws/audio. One client (the broker); when it disconnects socat exits and
+# systemd restarts the pair.
 [Unit]
-Description=RX audio stream (placeholder) - managed by RigBroker
+Description=RX audio for the web UI (receive only) - managed by RigBroker
 
 [Service]
 Type=exec
 User=rigbroker
-ExecStart=/bin/sleep infinity
+Group=rigbroker
+SupplementaryGroups=audio
+Environment=AUDIO_DEVICE=plughw:CARD=Device,DEV=0
+RuntimeDirectory=rigbroker-audio
+RuntimeDirectoryMode=0750
+ExecStart=/bin/sh -c 'exec arecord -q -D "$AUDIO_DEVICE" -t raw -f S16_LE -c 1 -r 16000 | socat -u STDIN UNIX-LISTEN:/run/rigbroker-audio/rx.sock,mode=0660,unlink-early'
+Restart=always
+RestartSec=1
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
 PrivateNetwork=yes
+RestrictAddressFamilies=AF_UNIX
+
+# No [Install]: only RigBroker starts it (it would otherwise hold the sound card APRS needs).

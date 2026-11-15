@@ -426,3 +426,26 @@ button.tune { border-color: var(--warn); color: var(--warn); font-weight: 600; }
 .hf-meter b { font: 600 13px var(--mono); text-align: right; }
 .hf-meter .meter-fill { background: var(--info); background-size: auto; }
 #hf-controls.disabled { opacity: 0.6; }
+
+/* Airband tab */
+.ab-top { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px; margin: 10px 0 14px; }
+.ab-freq { font: 600 30px/1 var(--mono); display: flex; align-items: baseline; gap: 8px; }
+.ab-freq small { font-size: 13px; color: var(--muted); }
+.ab-light { width: 12px; height: 12px; border-radius: 50%; background: var(--surface-2); border: 1px solid var(--border); align-self: center; }
+.ab-light.on { background: var(--ok); border-color: var(--ok); box-shadow: 0 0 8px var(--ok); }
+.ab-audio, .ab-sql, .ab-tune { display: flex; align-items: center; gap: 8px; }
+.ab-vol { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+.ab-sql b { font: 600 14px var(--mono); min-width: 3.5em; text-align: center; }
+.ab-tune input { width: 8.5em; font-family: var(--mono); }
+.ab-named { display: flex; flex-wrap: wrap; gap: 10px; margin: 6px 0 10px; }
+.ab-group { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 8px; }
+.ab-group > b { font-size: 13px; margin-right: 4px; }
+.ab-ch { display: inline-flex; flex-direction: column; align-items: flex-start; line-height: 1.15; }
+.ab-ch small { font: 11px var(--mono); color: var(--muted); }
+.ab-ch.cur, .ab-cell.cur { border-color: var(--info); box-shadow: inset 0 0 0 2px var(--info); }
+.ab-add { margin: 6px 0 12px; }
+.ab-grid { display: grid; gap: 3px; overflow-x: auto; }
+.ab-row { display: grid; grid-template-columns: 30px repeat(40, minmax(21px, 1fr)); gap: 2px; }
+.ab-mhz { font: 600 12px var(--mono); color: var(--muted); align-self: center; }
+.ab-cell { font: 9px var(--mono); padding: 3px 0; min-width: 0; border-radius: 3px; letter-spacing: -0.2px; }
+.ab-cell.named { background: var(--surface-2); border-color: var(--accent); color: var(--text); font-weight: 600; }
