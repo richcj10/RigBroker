@@ -659,6 +659,12 @@ class AirbandConfig(_Strict):
                                    description="channels added in the web UI; null = memory")
     audio_socket: str = Field(default="/run/rigbroker-audio/rx.sock",
                               description="raw 16 kHz mono S16LE from audio-stream.service")
+    scan_dwell_s: float = Field(default=0.5, gt=0, le=5,
+                                description="time on each channel looking for a signal")
+    scan_hang_s: float = Field(default=1.0, ge=0, le=30,
+                               description="stay this long after the squelch closes (reply)")
+    scan_max_hold_s: float = Field(default=60.0, gt=0, le=3600,
+                                   description="move on after this much continuous signal")
 
 
 class SecurityConfig(_Strict):

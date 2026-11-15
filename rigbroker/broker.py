@@ -29,6 +29,7 @@ from .position import PositionSync
 from .power import PowerStore
 from .radio import LeaseResult, RadioController
 from .rig_client import RigClient, RigctldClient
+from .scan import Scanner
 from .services import MockServiceController, ServiceController, SystemdServiceController
 from .state import RadioState
 from .winlink import GatewayStore, WinlinkPlanner, grid_to_latlon
@@ -96,12 +97,14 @@ class Broker:
                                     tx_gate=self.aprs_tx_gate, position=self.station_position)
         self.airband: AirbandChannels | None = None
         self.audio: AudioRelay | None = None
+        self.scanner: Scanner | None = None
         ab = config.airband
         if ab is not None and ab.radio in self.radios:
             if mock and ab.state_file:  # mock additions never touch the real list
                 ab = ab.model_copy(update={"state_file": ab.state_file + ".mock"})
             aradio = self.radios[ab.radio]
             self.airband = AirbandChannels(ab, aradio.cfg.profiles[ab.profile])
+            self.scanner = Scanner(aradio, self.airband, ab, self.events)
             arig = self.rigs[ab.radio]
             self.audio = AudioRelay(
                 ab.audio_socket, lambda: aradio.consumer == AUDIO_SERVICE,
@@ -360,6 +363,8 @@ class Broker:
             await self.audio.start()
 
     async def stop(self) -> None:
+        if self.scanner is not None:
+            await self.scanner.stop("broker shutting down")
         if self.audio is not None:
             await self.audio.stop()
         if self.bbs is not None:
@@ -386,6 +391,7 @@ class Broker:
             "schedule": [],  # scheduler arrives in milestone 5
             "aprs": self.aprs.status() if self.aprs else None,
             "bbs": self.bbs.status() if self.bbs else None,
+            "scan": self.scanner.status() if self.scanner else None,
             "audio": ({"connected": self.audio.connected, "listeners": self.audio.listeners}
                       if self.audio else None),
             "gps": self.position_sync.status() if self.position_sync else None,

@@ -655,6 +655,29 @@ class RadioController:
         self._emit("retune", f"tuned to {f / 1e6:.4f} MHz {m} by {by}")
         return True, f"{f / 1e6:.4f} MHz {m}"
 
+    async def scan_tune(self, freq: int) -> tuple[bool, str]:
+        """Scanner step: frequency only, no event log line / band memory (a scan would flood
+        both). Same limits as retune: manual session, not transmitting, inside freq_ranges."""
+        async with self._lock:
+            prof = self.manual_profile()
+            if prof is None:
+                return False, "no manual session"
+            if not prof.freq_allowed(freq):
+                return False, f"{freq / 1e6:.4f} MHz is outside {self.applied}"
+            try:
+                if await self.rig.get_ptt():
+                    return False, "the radio is transmitting"
+                await self.rig.set_freq(freq)
+                got = await self.rig.get_freq()
+            except RigError as exc:
+                return False, f"rig error: {exc}"
+            self.telemetry.freq = got
+            if abs(got - freq) > self.safety.freq_tolerance_hz:
+                return False, f"read-back mismatch: radio reports {got} Hz"
+            self.applied_freq = freq
+            self._follow_after = time.monotonic()
+        return True, "ok"
+
     async def set_squelch(self, level: float, *, by: str) -> tuple[bool, str]:
         """Adjust squelch (0..1) during a manual session, read back."""
         if not 0.0 <= level <= 1.0:

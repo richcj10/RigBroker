@@ -45,10 +45,12 @@ from .config import AirbandChannel, BbsEntry, WinlinkMode, normalize_call
 from .direwolf import INSTANCES, SERVICE_PREFIX, DirewolfManager, SettingsError
 from .leases import Verdict
 from .radio import LeaseResult, RadioController
+from .scan import Scanner
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 # Events that change what the UI shows -> push a fresh status right away.
-_STATUS_EVENTS = {"transition", "lease_started", "lease_ended", "lease_queued", "lease_dropped",
+_STATUS_EVENTS = {"scan",
+                  "transition", "lease_started", "lease_ended", "lease_queued", "lease_dropped",
                   "step", "tx_inhibit", "rig_offline", "rig_online", "alert", "mock_inject",
                   "plan_next", "winlink_attempt", "winlink_gateway"}
 # Leaflet is pinned with SRI from unpkg; map tiles come from OpenStreetMap. Nothing else
@@ -126,6 +128,10 @@ class TuneRequest(BaseModel):
 
 class SquelchRequest(BaseModel):
     level: float = Field(ge=0.0, le=1.0)
+
+
+class ScanListRequest(BaseModel):
+    freqs: list[int] = Field(default_factory=list, max_length=100)
 
 
 class AirbandAddRequest(BaseModel):
@@ -510,6 +516,9 @@ def create_app(broker: Broker, *, manage_lifecycle: bool = True,
     async def retune(rid: str, req: TuneRequest,
                      who: Principal = Depends(require_control),  # noqa: B008
     ) -> JSONResponse:
+        sc = broker.scanner
+        if sc is not None and sc.radio.id == rid:  # tuning by hand always wins
+            await sc.stop(f"tuned by hand ({who.name})")
         ok, msg = await radio(rid).retune(req.freq, req.mode, by=who.name)
         return JSONResponse({"ok": ok, "reason": msg}, status_code=200 if ok else 409)
 
@@ -530,6 +539,38 @@ def create_app(broker: Broker, *, manage_lifecycle: bool = True,
     @view.get("/airband")
     async def airband_info() -> dict[str, Any]:
         return airband().info()
+
+    def scanner() -> Scanner:
+        if broker.scanner is None:
+            raise HTTPException(404, "airband is not configured")
+        return broker.scanner
+
+    @control.put("/airband/scan")
+    async def scan_list(req: ScanListRequest) -> dict[str, Any]:
+        try:
+            freqs = airband().set_scan(req.freqs)
+        except AirbandError as exc:
+            raise HTTPException(422, str(exc)) from None
+        return {"ok": True, "scan": freqs}
+
+    @control.post("/airband/scan/start")
+    async def scan_start(who: Principal = Depends(require_control),  # noqa: B008
+    ) -> JSONResponse:
+        ok, msg = await scanner().start(by=who.name)
+        return JSONResponse({"ok": ok, "reason": msg}, status_code=200 if ok else 409)
+
+    @control.post("/airband/scan/stop")
+    async def scan_stop(who: Principal = Depends(require_control),  # noqa: B008
+    ) -> JSONResponse:
+        ok = await scanner().stop(f"stopped by {who.name}")
+        return JSONResponse({"ok": ok, "reason": "stopped" if ok else "not scanning"},
+                            status_code=200 if ok else 409)
+
+    @control.post("/airband/scan/skip")
+    async def scan_skip() -> JSONResponse:
+        ok = scanner().skip()
+        return JSONResponse({"ok": ok, "reason": "skipped" if ok else "not holding"},
+                            status_code=200 if ok else 409)
 
     @admin.post("/airband/channels")
     async def airband_add(req: AirbandAddRequest) -> dict[str, Any]:

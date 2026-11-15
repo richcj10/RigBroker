@@ -75,6 +75,12 @@
           <button type="submit" class="small">Tune</button>
         </form>
       </div>
+      <div class="ab-scan">
+        <button type="button" id="ab-scan" disabled>Scan</button>
+        <button type="button" class="ghost small" id="ab-skip" hidden title="Move on now and leave this channel out until the scan restarts">Skip</button>
+        <button type="button" class="ghost small" id="ab-scan-edit" title="While on, clicking a channel adds/removes it from the scan list">Edit scan list</button>
+        <span class="sub" id="ab-scan-state"></span>
+      </div>
       <div id="ab-named" class="ab-named"></div>
       <details class="ab-add">
         <summary class="sub">+ Add a named channel</summary>

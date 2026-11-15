@@ -1,7 +1,8 @@
 "use strict";
 // Airband tab: receive-only AM listening on the VHF radio, audio played in the browser.
 (() => {
-  const A = { radio: null, profile: null, step: 25000, range: [118000000, 136975000], named: new Map(), r: null };
+  const A = { radio: null, profile: null, step: 25000, range: [118000000, 136975000], named: new Map(), r: null,
+              scan: [], editing: false, sc: null };
   const RATE = 16000;
   const au = { ctx: null, gain: null, ws: null, next: 0, want: false, frames: 0 };
 
@@ -10,6 +11,47 @@
     const res = await api("POST", `/radios/${A.radio}/tune`, { freq: Math.round(hz), mode: "AM" }, { quiet: true });
     if (!res.ok && res.data && res.data.reason) toast(res.data.reason, true);
   }
+
+  // ------------------------------------------------------------ scan list + scan
+  // a click tunes; in "Edit scan list" mode it adds/removes the channel from the scan list
+  function pick(f) { if (A.editing) toggleScan(f); else tune(f); }
+  async function toggleScan(f) {
+    const list = A.scan.includes(f) ? A.scan.filter((x) => x !== f) : [...A.scan, f];
+    const res = await api("PUT", "/airband/scan", { freqs: list }, { quiet: true });
+    if (res.ok) { A.scan = res.data.scan; markScan(); renderScan(); }
+    else if (res.data && res.data.detail) toast(String(res.data.detail), true);
+  }
+  function markScan() {
+    for (const el of document.querySelectorAll(".ab-cell, .ab-ch")) el.classList.toggle("scan", A.scan.includes(Number(el.dataset.freq)));
+  }
+  function renderScan() {
+    const sc = A.sc || { state: "off" };
+    const on = !!A.r && A.r.applied_profile === A.profile && A.r.state === "active";
+    const running = sc.state !== "off";
+    $("#ab-scan").textContent = running ? "■ Stop scan" : "Scan";
+    $("#ab-scan").className = running ? "danger" : "";
+    $("#ab-scan").disabled = !running && (!on || !A.scan.length);
+    $("#ab-skip").hidden = sc.state !== "holding";
+    const n = A.scan.length;
+    $("#ab-scan-state").textContent = sc.state === "holding"
+      ? `HOLD ${mhz(sc.freq)}${sc.name ? " " + sc.name : ""} · ${Math.round(sc.hold_s || 0)} s`
+      : sc.state === "scanning" ? `Scanning ${n - (sc.skipped || []).length} of ${n} channels…`
+      : `${n} channel${n === 1 ? "" : "s"} in the scan list${n ? "" : " - use Edit scan list"}${sc.stopped ? ` · last scan: ${sc.stopped}` : ""}`;
+    $("#ab-scan-state").classList.toggle("hold", sc.state === "holding");
+  }
+  $("#ab-scan").addEventListener("click", async () => {
+    const running = A.sc && A.sc.state !== "off";
+    const res = await api("POST", `/airband/scan/${running ? "stop" : "start"}`, {}, { quiet: true });
+    if (!res.ok && res.data && res.data.reason) toast(res.data.reason, true);
+  });
+  $("#ab-skip").addEventListener("click", () => api("POST", "/airband/scan/skip", {}, { quiet: true }));
+  $("#ab-scan-edit").addEventListener("click", () => {
+    A.editing = !A.editing;
+    $("#ab-scan-edit").classList.toggle("on", A.editing);
+    $("#ab-scan-edit").textContent = A.editing ? "Done editing" : "Edit scan list";
+    $("#airband-panel").classList.toggle("editing", A.editing);
+    if (A.r) render(A.r);
+  });
 
   // ------------------------------------------------------------ channel list + grid
   function buildNamed(channels) {
@@ -34,7 +76,7 @@
         const f = document.createElement("small"); f.textContent = mhz(c.freq);
         b.append(n, f);
         b.title = `${g} ${c.name} ${mhz(c.freq)} MHz${c.source === "user" ? " (added here)" : ""}`;
-        b.addEventListener("click", () => tune(c.freq));
+        b.addEventListener("click", () => pick(c.freq));
         box.append(b);
       }
       frag.append(box);
@@ -58,7 +100,7 @@
         const named = A.named.get(f);
         if (named) { c.classList.add("named"); c.title = `${mhz(f)} ${named.group} ${named.name}`; }
         else c.title = `${mhz(f)} MHz`;
-        c.addEventListener("click", () => tune(f));
+        c.addEventListener("click", () => pick(f));
         row.append(c);
       }
       frag.append(row);
@@ -73,8 +115,10 @@
     A.radio = d.radio; A.profile = d.profile; A.step = d.step_hz; A.range = d.range;
     $("#nav-airband").hidden = false;
     $("#airband-panel").hidden = false;
+    A.scan = d.scan || [];
     buildNamed(d.channels);
     buildGrid();
+    markScan();
     if (A.r) render(A.r);
   }
 
@@ -176,7 +220,8 @@
     $("#ab-freq").textContent = on && r.applied_freq ? mhz(r.applied_freq) : "—";
     $("#ab-light").classList.toggle("on", on && !!t.dcd);
     $("#ab-sql").textContent = on && r.squelch != null ? `${Math.round(r.squelch * 100)}%` : "—";
-    for (const el of document.querySelectorAll("#ab-sql-down, #ab-sql-up, #ab-freq-form button, .ab-cell, .ab-ch")) el.disabled = !on;
+    for (const el of document.querySelectorAll("#ab-sql-down, #ab-sql-up, #ab-freq-form button")) el.disabled = !on;
+    for (const el of document.querySelectorAll(".ab-cell, .ab-ch")) el.disabled = !on && !A.editing;
     $("#ab-play").disabled = !on;
     if (!on && au.want) stopAudio();
     const cur = on ? r.applied_freq : null;
@@ -187,7 +232,10 @@
   const prev = window.onStatus;
   window.onStatus = (st) => {
     if (prev) prev(st);
+    if (st.scan) { A.sc = st.scan; if (st.scan.list) A.scan = st.scan.list; }
     if (A.radio && st.radios[A.radio]) render(st.radios[A.radio]);
+    markScan();
+    renderScan();
   };
   load();
 })();

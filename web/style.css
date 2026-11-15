@@ -449,3 +449,10 @@ button.tune { border-color: var(--warn); color: var(--warn); font-weight: 600; }
 .ab-mhz { font: 600 12px var(--mono); color: var(--muted); align-self: center; }
 .ab-cell { font: 9px var(--mono); padding: 3px 0; min-width: 0; border-radius: 3px; letter-spacing: -0.2px; }
 .ab-cell.named { background: var(--surface-2); border-color: var(--accent); color: var(--text); font-weight: 600; }
+
+/* Airband scan */
+.ab-scan { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 4px 0 12px; }
+#ab-scan-state.hold { color: var(--ok); font-weight: 600; }
+#ab-scan-edit.on { border-color: var(--accent); color: var(--accent); }
+.ab-cell.scan, .ab-ch.scan { outline: 2px solid var(--ok); outline-offset: -2px; }
+#airband-panel.editing .ab-grid, #airband-panel.editing .ab-named { cursor: copy; }
