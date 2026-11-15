@@ -638,7 +638,7 @@ class AirbandChannel(_Strict):
 
     freq: int = Field(gt=0, description="Hz")
     name: str = Field(max_length=60)
-    group: str = Field(default="", max_length=30, description="e.g. the airport, KPHX")
+    group: str = Field(default="", max_length=30, description="e.g. the airport, KABC")
 
     @field_validator("name", "group")
     @classmethod
